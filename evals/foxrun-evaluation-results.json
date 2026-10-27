@@ -1,0 +1,284 @@
+{
+  "revision": "73076296106a6785da721694dd474c435b8fe980",
+  "independent_checks": [
+    {
+      "case": "missing acceptance rejected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "complete task created",
+      "passed": true,
+      "detail": "T3"
+    },
+    {
+      "case": "fresh process sees task",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "accept without completion rejected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "missing proof rejected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "completion with proof enters review",
+      "passed": true,
+      "detail": "ok done T3\n"
+    },
+    {
+      "case": "finisher cannot self-accept",
+      "passed": true,
+      "detail": "work failed: finisher rule: worker finished T3 (latest finished status); worker cannot sign it off\n"
+    },
+    {
+      "case": "independent reviewer accepts",
+      "passed": true,
+      "detail": "ok accept T3\n"
+    },
+    {
+      "case": "completed status persisted",
+      "passed": true,
+      "detail": "{\n  \"id\": \"T3\",\n  \"title\": \"Independent inventory check\",\n  \"note\": null,\n  \"status\": \"done\",\n  \"owner\": null,\n  \"claimed_by\": null,\n  \"project\": null,\n  \"acceptance\": \"[\\\"Three units counted\\\"]\"\n}\n link: {'relation': 'where', 'path': '/workspace/foxrun-evaluation/portfolio/sample-shop/STATE.md', 'external_id': '/workspace/foxrun-evaluation/portfolio/sample-shop/STATE.md'}\n link: {'relation': 'produced', 'path': '/workspace/foxrun-evaluation/portfolio/sample-shop/inventory-proof.txt', 'external_id': '/workspace/foxrun-evaluation/portfolio/sample-shop/inventory-proof.txt'}\n"
+    },
+    {
+      "case": "lesson stored",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "new session reads lesson",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "unknown workspace refused",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "hookup idempotent",
+      "passed": true,
+      "detail": "Claude: already connected in /workspace/foxrun-evaluation/runtime/claude/settings.json\nCodex: already connected in /workspace/foxrun-evaluation/runtime/codex/hooks.json\nNothing changed.\n"
+    },
+    {
+      "case": "16 concurrent run folders unique",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "same-version update succeeds",
+      "passed": false,
+      "detail": "Update refused or failed: The source /workspace/foxrun is not safe to run: / is owned by another user.\n"
+    },
+    {
+      "case": "update preserves local and workspace bytes",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "update preserves task",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "case": "post-update doctor clean",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "component_suites": [
+    {
+      "suite": "agents/tests",
+      "code": 1,
+      "seconds": 0.82
+    },
+    {
+      "suite": "base/tests",
+      "code": 1,
+      "seconds": 99.67
+    },
+    {
+      "suite": "capture/tests",
+      "code": 0,
+      "seconds": 0.77
+    },
+    {
+      "suite": "cron/tests",
+      "code": 0,
+      "seconds": 0.16
+    },
+    {
+      "suite": "decisions/tests",
+      "code": 5,
+      "seconds": 0.06
+    },
+    {
+      "suite": "events/tests",
+      "code": 0,
+      "seconds": 0.06
+    },
+    {
+      "suite": "memory/tests",
+      "code": 1,
+      "seconds": 15.01
+    },
+    {
+      "suite": "skills/orchestrate/tests",
+      "code": 1,
+      "seconds": 0.97
+    },
+    {
+      "suite": "skillwright/skills/agent-new/tests",
+      "code": 0,
+      "seconds": 0.06
+    },
+    {
+      "suite": "skillwright/skills/foxrun-help/tests",
+      "code": 0,
+      "seconds": 0.16
+    },
+    {
+      "suite": "skillwright/skills/foxrun-setup/tests",
+      "code": 0,
+      "seconds": 0.77
+    },
+    {
+      "suite": "skillwright/skills/handoff/tests",
+      "code": 0,
+      "seconds": 2.67
+    },
+    {
+      "suite": "skillwright/skills/imessage/tests",
+      "code": 0,
+      "seconds": 0.16
+    },
+    {
+      "suite": "skillwright/skills/jev/tests",
+      "code": 0,
+      "seconds": 0.17
+    },
+    {
+      "suite": "skillwright/skills/orchestrate/tests",
+      "code": 1,
+      "seconds": 0.92
+    },
+    {
+      "suite": "skillwright/skills/runtime-session-search/tests",
+      "code": 1,
+      "seconds": 0.11
+    },
+    {
+      "suite": "skillwright/skills/skillify/tests",
+      "code": 1,
+      "seconds": 0.82
+    },
+    {
+      "suite": "skillwright/skills/thread/tests",
+      "code": 0,
+      "seconds": 1.23
+    },
+    {
+      "suite": "skillwright/tests",
+      "code": 1,
+      "seconds": 22.64
+    },
+    {
+      "suite": "work/tests",
+      "code": 1,
+      "seconds": 98.73
+    }
+  ],
+  "memory_evaluations": [
+    {
+      "test": "01-rule",
+      "numerator": 94,
+      "denominator": 94,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "02-read",
+      "numerator": 35,
+      "denominator": 35,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "03-reliability",
+      "numerator": 6,
+      "denominator": 6,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "04-code-first",
+      "numerator": 28,
+      "denominator": 28,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "05-trace",
+      "numerator": 101,
+      "denominator": 101,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "06-fetch",
+      "numerator": 21,
+      "denominator": 21,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "07-triangulate",
+      "numerator": 3,
+      "denominator": 3,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "08-field",
+      "numerator": 6,
+      "denominator": 6,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "09-portability",
+      "numerator": 3,
+      "denominator": 3,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "10-night-shift",
+      "numerator": 6,
+      "denominator": 6,
+      "passed": true,
+      "failures": []
+    },
+    {
+      "test": "11-seven-nights",
+      "numerator": 4,
+      "denominator": 11,
+      "passed": false,
+      "failures": [
+        "night 1 recovery: model failure: ValueError: Actual tool-free model adapter failure is retained; successful recovery remains unproven",
+        "night 2 recovery: bad input: ValueError: Blank input refused; its original source bytes remain",
+        "night 5 recovery: stale lease: ValueError: Current runner requires manual recovery of dead locks; automatic stale-lease recovery is unproven",
+        "night 6 recovery: disk pressure: ValueError: Actual atomic writer preserves the old page on ENOSPC; no quota/catch-up recovery exists",
+        "night 7 recovery: bad backup: ValueError: Actual backup exporter refuses corrupt input; last-good bytes stay; successful recovery remains unproven",
+        "live seven-night proof: expected behavior was not observed",
+        "independent local-alert delivery proof: expected behavior was not observed"
+      ]
+    }
+  ]
+}

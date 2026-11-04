@@ -1,0 +1,12 @@
+{
+  "name": "Foxrun disposable demo · local Gemma",
+  "dockerComposeFile": "compose.yaml",
+  "service": "demo",
+  "workspaceFolder": "/workspaces/foxrun",
+  "remoteUser": "vscode",
+  "hostRequirements": {"cpus": 4, "memory": "16gb", "storage": "32gb"},
+  "forwardPorts": [8080],
+  "portsAttributes": {"8080": {"label": "Foxrun demo (private)", "onAutoForward": "openBrowser", "visibility": "private"}},
+  "postStartCommand": "python3 demo/start.py",
+  "shutdownAction": "stopCompose"
+}

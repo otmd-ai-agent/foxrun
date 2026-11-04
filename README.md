@@ -14,6 +14,12 @@ Free and open source. Built by an operator who runs multiple businesses from his
 
 <p align="center"><a href="#quick-start">Quick Start</a> · <a href="#the-problem">The problem</a> · <a href="#what-you-get">What you get</a> · <a href="#who-its-for">Who it's for</a> · <a href="#install">Install</a> · <a href="#faq">FAQ</a> · <a href="#why-i-built-it">Why I built it</a></p>
 
+## Try a disposable Codespaces demo
+
+[Open the local-model demo](https://codespaces.new/otmd-ai-agent/foxrun?ref=demo%2Fcodespaces-gemma) · [Setup, limits, and measured results](demo/README.md)
+
+This fork includes an experimental devcontainer with Docker Model Runner and quantized Gemma 4 E4B. Use a 4-core / 16 GB Codespace. No paid model API key is required; GitHub compute/storage quotas still apply. The first launch downloads 5.15 GB. Use synthetic data only and delete the codespace when finished. The demo covers tasks, saved proof, human review, and recovery in a new chat; it does not run the full agent team. Docker has been tested in a cloud environment; an actual Codespaces launch is not yet verified.
+
 ## Quick Start
 
 > [!TIP]

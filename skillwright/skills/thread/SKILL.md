@@ -3,7 +3,7 @@ type: note
 workspace: system
 timestamp: 2026-10-23T22:07:53-04:00
 name: thread
-description: "Make an agent thread in Claude or Codex: a titled session that starts in its workspace and boots its seat, in the Claude app, a terminal, or Codex. Use for /thread (list the agents and offer the missing threads), /thread <agent>, /thread lead <workspace>, or the thread step of setup."
+description: "Make an agent thread in Claude, Codex, or OpenCode: a titled session that starts in its workspace and boots its seat, in the Claude app, a terminal, Codex, or the OpenCode browser. Use for /thread (list the agents and offer the missing threads), /thread <agent>, /thread lead <workspace>, or the thread step of setup."
 kind: tool
 argument-hint: "[<agent> | lead <workspace>]"
 ---
@@ -24,8 +24,8 @@ The title is `<emoji> <workspace> · <role>`, so the person finds the agent in t
    Done when you know the seat, or the person picked the seats from the list.
 2. **Ask what the plan needs.** Use the runtime's question tool, one question each:
    - The workspace, for an agent thread. A lead thread or a workspace agent's thread starts in its own workspace.
-   - The runtime: `claude-desktop`, `claude-cli`, or `codex`. Offer the one you run in first.
-   - The model tier: `judgment`, `work`, `cheap`, or `code`, from `~/.foxrun/config/models.yaml`. The seat's own tier is the default. Name the model each tier gives.
+   - The runtime: `claude-desktop`, `claude-cli`, `codex`, or `opencode`. Offer the one you run in first.
+   - The model tier: `judgment`, `work`, `cheap`, or `code`, from `~/.foxrun/config/models.yaml`. The seat's own tier is the default. Name the model each tier gives. In OpenCode Codespaces, `FOXRUN_OPENCODE_MODEL` selects the configured local model for every seat; show it and skip the tier question.
    Done when each answer is in hand. Skip a question when the person already answered it.
 3. **Pick the emoji.** Suggest one emoji that fits this thread's work, such as 📦 for a shipping thread. Offer the seat's default as the other choice: `bin/thread plan` prints it with `emoji_state` `default`. The person can type another one. The emoji varies by thread; the map holds only defaults. Done when the person picked one.
 4. **Plan.** Run `bin/thread plan <seat | lead ws> --runtime <r> --workspace <ws> --tier <t> --emoji <picked>`. Leave out `--emoji` when the person took the default. Show the person the `title`, `cwd`, and `model`, and let them change the emoji or any answer before you go on. Done when the person says yes to that plan.
@@ -33,10 +33,15 @@ The title is `<emoji> <workspace> · <role>`, so the person finds the agent in t
    - `claude-desktop`: call the Claude app's own new-session tool with the plan's `title`, `cwd`, and `prompt`. Then run `bin/thread record <seat> --runtime claude-desktop --workspace <ws> --id <session id>`.
    - `codex`: run `bin/thread make ... --runtime codex`. It starts `codex app-server`, then sends `thread/start`, `thread/name/set`, and `turn/start`, and waits for the boot turn to end.
    - `claude-cli`: run `bin/thread make ... --runtime claude-cli`. It runs `claude --bg -n "<title>" --model <model> "<prompt>"` in the workspace folder.
+   - `opencode`: run `bin/thread make ... --runtime opencode`. It creates a titled session in the running OpenCode server, records its real session id, and queues the seat's boot prompt. `"boot": "queued"` means the turn is still running or waiting for approval; it does not mean onboarding finished.
    Done when the JSON shows `"made": true` or a `recorded` entry with an `id`.
-6. **Report.** Give the title, the runtime, and where the person finds it: the Claude sidebar, the Codex sidebar, or `claude agents`. Done when the person has the title and the place.
+6. **Report.** Give the title, the runtime, and where the person finds it: the Claude sidebar, the Codex sidebar, `claude agents`, or the workspace's session list in OpenCode. Done when the person has the title and the place.
 
 ## Gotchas
+
+- OpenCode uses `FOXRUN_OPENCODE_URL` (default `http://127.0.0.1:8081`) and the server's `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` when set. `opencode web` must already be running.
+- OpenCode sessions are scoped to the planned workspace. Open that directory in the browser to find the session by title. The model name is `provider/model`, such as `dmr/local-model`.
+- If OpenCode creates a session but cannot queue the boot prompt, the error names the saved session. Continue that session with the planned prompt; do not create a replacement.
 
 - `claude --bg` refuses a folder Claude does not trust yet. The error says to open `claude` once in that folder and accept the prompt. Tell the person that, then retry.
 - A `claude --bg` session shows in `claude agents`, not in the Claude app sidebar. Use `claude-desktop` when the person wants the sidebar.

@@ -1,0 +1,43 @@
+services:
+  foxrun:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/foxrun:cached
+      - foxrun-state:/workspaces/foxrun-state
+    environment:
+      FOXRUN_EPHEMERAL: "1"
+      FOXRUN_CODESPACES_STATE: /workspaces/foxrun-state
+      FOXRUN_HOME: /workspaces/foxrun-state/system
+      FOXRUN_PORTFOLIO: /workspaces/foxrun-state/portfolio
+      FOXRUN_PRODUCT_SOURCE: /workspaces/foxrun
+      OPENCODE_CONFIG_DIR: /workspaces/foxrun-state/opencode-config
+      XDG_DATA_HOME: /workspaces/foxrun-state/data
+      XDG_STATE_HOME: /workspaces/foxrun-state/state
+      XDG_CACHE_HOME: /workspaces/foxrun-state/cache
+      FOXRUN_OPENCODE_TRANSCRIPTS: /workspaces/foxrun-state/transcripts
+      FOXRUN_OPENCODE_URL: http://127.0.0.1:8081
+      FOXRUN_OPENCODE_MODEL: dmr/foxrun/gemma4-e4b:qat-q4_0-32k
+      MODEL_RUNNER_HOST: http://model-runner:12434
+      NO_PROXY: localhost,127.0.0.1,model-runner
+      no_proxy: localhost,127.0.0.1,model-runner
+    depends_on:
+      model-runner:
+        condition: service_healthy
+  model-runner:
+    image: docker/model-runner@sha256:60e6a14d8cc331fab3e51d7b78bba98274b4d28573f4e0b345e475d52d167869
+    environment:
+      LLAMA_ARGS: --ctx-size 32768 --threads 4 --threads-batch 4 --n-gpu-layers 0 --jinja
+      DO_NOT_TRACK: "1"
+    volumes:
+      - model-cache:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:12434/engines/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+volumes:
+  model-cache:
+  foxrun-state:

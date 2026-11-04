@@ -41,7 +41,7 @@ class SetupTests(unittest.TestCase):
                           workspaces=["fake-hq", "fake-shop"], portfolio="../foxrun")
         self.env = {**os.environ, "HOME": str(self.root), "FOXRUN_HOME": str(self.home),
                     "THREAD_CODEX_STATE_DB": str(self.root / "none.sqlite")}
-        for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "FOXRUN_PORTFOLIO"):
+        for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "OPENCODE_CONFIG_DIR", "FOXRUN_PORTFOLIO", "FOXRUN_EPHEMERAL"):
             self.env.pop(key, None)
 
     def write_person(self, **data):
@@ -206,7 +206,48 @@ class SetupTests(unittest.TestCase):
         backup = self.part(self.run_setup("status", "--part", "backup"), "backup")
         self.assertFalse(backup["nightly_on"])
         self.assertEqual([item["question"] for item in backup["open"]],
-                         ["Turn on the nightly job?", "Push the state backup to a private remote repository?"])
+                         ["Turn on the nightly job?" if sys.platform == "darwin" else "Run the nightly maintenance job now? Automatic scheduling is not configured on this platform.", "Push the state backup to a private remote repository?"])
+
+    def test_opencode_uses_plugin_registration_in_its_own_config_directory(self):
+        self.write_person(name="fake-person", runtime="opencode", default_workspace="fake-hq",
+                          workspaces=["fake-hq"], portfolio="../foxrun")
+        settings = self.root / "custom-opencode/opencode.json"
+        settings.parent.mkdir()
+        self.env["OPENCODE_CONFIG_DIR"] = str(settings.parent)
+        result = self.run_setup("status", "--part", "hooks")
+        missing = result["parts"][0]["runtimes"][0]["missing"]
+        self.assertEqual(missing[0]["event"], "OpenCodePlugin")
+        plugin = self.home / "hooks/opencode/foxrun.mjs"
+        plugin.parent.mkdir()
+        plugin.write_text("// Labeled test plugin.\n")
+        settings.write_text(json.dumps({"plugin": ["other-plugin", plugin.as_uri()]}))
+        result = self.run_setup("status", "--part", "hooks")
+        self.assertEqual(result["parts"][0]["open"], [])
+        self.assertFalse((self.root / ".codex").exists())
+        plugin.unlink()
+        result = self.run_setup("status", "--part", "hooks")
+        self.assertEqual(len(result["parts"][0]["runtimes"][0]["missing"]), 1)
+
+    def test_opencode_invalid_config_does_not_claim_memory_is_connected(self):
+        self.run_setup("set", "--field", "runtime=opencode")
+        folder = self.root / ".config/opencode"
+        folder.mkdir(parents=True)
+        (folder / "opencode.json").write_text('{"plugin": "invalid"}')
+        result = self.run_setup("hooks", "--answer", "yes", code=1)
+        self.assertIn("expected an object with a plugin list", result["error"])
+
+    def test_disposable_codespace_does_not_offer_schedules_or_remote_backups(self):
+        self.env["FOXRUN_EPHEMERAL"] = "1"
+        result = self.run_setup("status", "--part", "backup")["parts"][0]
+        self.assertEqual(result["open"], [])
+        self.assertFalse(result["nightly_on"])
+        self.assertEqual(result["note"], "Not scheduled in this disposable Codespace.")
+
+    def test_opencode_questions_accept_native_runtime(self):
+        self.run_setup("set", "--field", "runtime=opencode")
+        result = self.run_setup("status", "--part", "questions")
+        self.assertEqual(result["parts"][0]["open"], [])
+        self.assertEqual(result["parts"][0]["answers"]["runtime"], "opencode")
 
     def test_set_dry_run_writes_nothing_and_real_run_writes(self):
         before = (self.home / "config/person.json").read_text()

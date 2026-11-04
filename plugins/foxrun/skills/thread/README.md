@@ -15,4 +15,4 @@ This folder holds the source of the `thread` skill.
 | `replays/plan-lead-claude-cli.json` | Checks a workspace lead's terminal plan with `claude --bg`. |
 | `replays/refuse-agent-without-workspace.json` | Checks that an agent thread needs a workspace answer. |
 | `tests/__init__.py` | Marks the thread test package. |
-| `tests/test_thread.py` | Checks listing, planning, refusals, dry runs, both made routes against stub apps, and a workspace agent made by `agent_new`. |
+| `tests/test_thread.py` | Checks listing, planning, refusals, dry runs, native session routes against stub apps and an HTTP fixture, and a workspace agent made by `agent_new`. |

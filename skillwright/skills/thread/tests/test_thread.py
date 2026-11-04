@@ -1,6 +1,10 @@
 """thread checks on labeled fake data in a temporary home. No real app or thread is touched."""
 
 import json
+import base64
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
+import urllib.parse
 import os
 from pathlib import Path
 import sqlite3
@@ -195,6 +199,63 @@ class ThreadTests(unittest.TestCase):
         result = self.run_thread("make", "architect", "--workspace", "fake-hq", "--runtime", "claude-cli",
                                  code=1, STUB_UNTRUSTED="1")
         self.assertIn("Open `claude` once in", result["error"])
+        self.assertFalse((self.home / "config/threads.json").exists())
+
+    def opencode_server(self, fail_prompt=False):
+        calls = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                calls.append((self.path, body, self.headers.get("Authorization")))
+                path = urllib.parse.urlsplit(self.path).path
+                status = 502 if fail_prompt and path.endswith("/prompt_async") else 200 if path == "/session" else 204
+                self.send_response(status)
+                self.end_headers()
+                if status == 200:
+                    self.wfile.write(b'{"id":"ses_native_test"}')
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.env["FOXRUN_OPENCODE_URL"] = "http://127.0.0.1:" + str(server.server_port)
+        self.env["FOXRUN_OPENCODE_MODEL"] = "dmr/test/local-model"
+        self.env["OPENCODE_SERVER_PASSWORD"] = "labeled-test-password"
+        (self.home / "agents/architect.md").write_text(seat("architect", "Architect", runtimes=("opencode",)))
+        return calls
+
+    def test_opencode_creates_real_session_and_queues_boot_in_its_workspace(self):
+        calls = self.opencode_server()
+        result = self.run_thread("make", "architect", "--workspace", "fake-hq", "--runtime", "opencode")
+        self.assertTrue(result["made"])
+        self.assertEqual(result["boot"], "queued")
+        self.assertEqual(result["recorded"]["id"], "ses_native_test")
+        self.assertEqual(result["recorded"]["runtime"], "opencode")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][1], {"title": result["title"]})
+        self.assertEqual(calls[1][1]["model"], {"providerID": "dmr", "modelID": "test/local-model"})
+        self.assertIn("--seat architect", calls[1][1]["parts"][0]["text"])
+        for path, body, auth in calls:
+            self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(path).query),
+                             {"directory": [str(self.folder / "fake-hq")]})
+            self.assertEqual(auth, "Basic " + base64.b64encode(b"opencode:labeled-test-password").decode())
+        self.assertTrue(self.run_thread("list")["agents"][0]["has_thread"])
+
+    def test_opencode_boot_failure_keeps_created_session_and_does_not_claim_success(self):
+        calls = self.opencode_server(fail_prompt=True)
+        result = self.run_thread("make", "architect", "--workspace", "fake-hq", "--runtime", "opencode", code=1)
+        self.assertIn("ses_native_test was created and recorded", result["error"])
+        self.assertIn("do not create another thread", result["error"])
+        self.assertEqual(self.saved()["architect@fake-hq"]["id"], "ses_native_test")
+        self.assertEqual(len(calls), 2)
+
+    def test_opencode_dry_run_never_calls_the_server(self):
+        calls = self.opencode_server()
+        result = self.run_thread("make", "architect", "--workspace", "fake-hq", "--runtime", "opencode", "--dry-run")
+        self.assertFalse(result["made"])
+        self.assertEqual(calls, [])
         self.assertFalse((self.home / "config/threads.json").exists())
 
     def test_record_saves_a_desktop_thread(self):

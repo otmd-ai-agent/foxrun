@@ -150,6 +150,20 @@ def test_render_writes_marked_capes_reports_gaps_and_protects_unmarked(world, ca
     assert "Refusing to overwrite unmarked cape" in capsys.readouterr().err
 
 
+def test_opencode_renders_canonical_identity_and_inherits_provider(world, monkeypatch):
+    identity = write_identity(world, mode="none", runtimes=["opencode"])
+    monkeypatch.delenv("FOXRUN_OPENCODE_MODEL", raising=False)
+    cape = agent_new.opencode_cape(identity, world.repo)
+    assert f"Read {identity.path} fully before anything else." in cape
+    assert "mode: \"all\"" in cape
+    assert "model:" not in cape
+    monkeypatch.setenv("FOXRUN_OPENCODE_MODEL", "dmr/local-model")
+    assert 'model: "dmr/local-model"' in agent_new.opencode_cape(identity, world.repo)
+    assert agent_new.main(["render", "demo-agent"]) == 0
+    assert (world.repo.parent / "runs/generated/agents/opencode/demo-agent.md").is_file()
+    assert not (world.repo.parent / "runs/generated/agents/codex/demo-agent.toml").exists()
+
+
 def test_policy_and_rendered_models_match_model_file(world):
     source = yaml.safe_load((world.repo.parent / "config/models.yaml").read_text())
     assert source["tiers"] == POLICY["tiers"]

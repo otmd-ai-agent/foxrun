@@ -1,4 +1,4 @@
-"""Connect the Foxrun session hooks to Claude Code and Codex settings.
+"""Connect Foxrun session hooks to the selected agent runtime.
 
 `install.py --hookup` and `foxrun.py hookup` share this one merge. It keeps every
 other entry in the settings file and adds only the Foxrun entries that are missing.
@@ -21,7 +21,7 @@ import shlex
 import sys
 import uuid
 
-RUNTIMES = ('claude', 'codex')
+RUNTIMES = ('claude', 'codex', 'opencode')
 SCRIPTS = ('session-start', 'after-compact', 'before-compact')
 
 
@@ -32,7 +32,12 @@ def write_text(path, text):
 
 
 def settings_name(runtime):
-    return 'settings.json' if runtime == 'claude' else 'hooks.json'
+    return {'claude': 'settings.json', 'codex': 'hooks.json', 'opencode': 'opencode.json'}[runtime]
+
+
+def opencode_plugin(home):
+    """Return the native plugin URI shared by hookup and setup's presence check."""
+    return (Path(home).resolve() / 'hooks/opencode/foxrun.mjs').as_uri()
 
 
 def hook_entries(home, runtime):
@@ -75,6 +80,22 @@ def merge(data, home, runtime):
     """Add the missing Foxrun entries to one settings object. Return what was added.
     An entry counts as present when an existing command of the same event runs its script,
     as setup's status check reads it. Nothing else in the object changes."""
+    if runtime == 'opencode':
+        if not isinstance(data, dict) or not isinstance(data.get('plugin', []), list):
+            raise ValueError('OpenCode settings must contain a JSON object with a plugin list')
+        plugins = data.setdefault('plugin', [])
+        uri = opencode_plugin(home)
+        source = os.environ.get('FOXRUN_PRODUCT_SOURCE')
+        removed = []
+        if source:
+            bootstrap = opencode_plugin(source)
+            if bootstrap != uri:
+                removed = [item for item in plugins if item == bootstrap]
+                plugins[:] = [item for item in plugins if item != bootstrap]
+        if any(item == uri or (isinstance(item, list) and item and item[0] == uri) for item in plugins):
+            return [{'event': 'OpenCode plugin replacement', 'script': uri}] if removed else []
+        plugins.append(uri)
+        return [{'event': 'OpenCode plugin', 'script': uri}]
     if not isinstance(data, dict) or not isinstance(data.get('hooks', {}), dict):
         raise ValueError('runtime settings must contain a JSON object with hooks')
     hooks = data.setdefault('hooks', {})
@@ -260,7 +281,7 @@ def connect(home, paths):
             raise ValueError('runtime settings are not valid JSON: ' + str(settings) + ': ' + str(error))
         # merge checks the shape of the settings first; then the old group can go.
         added = merge(data, home, runtime)
-        removed = drop_old(data, home)
+        removed = [] if runtime == 'opencode' else drop_old(data, home)
         if added or removed:
             plans.append((runtime, settings, raw, json.dumps(data, indent=2) + '\n', None))
         row = {'runtime': runtime, 'settings': str(settings), 'added': added, 'removed': removed}
@@ -292,8 +313,11 @@ def runtime_settings(runtime, runtime_home=None, both=False):
         if both:
             folder /= runtime
     else:
-        base = os.environ.get('CLAUDE_CONFIG_DIR' if runtime == 'claude' else 'CODEX_HOME')
-        folder = Path(base).expanduser() if base else Path.home() / ('.' + runtime)
+        variable = {'claude': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME', 'opencode': 'OPENCODE_CONFIG_DIR'}[runtime]
+        base = os.environ.get(variable)
+        default = (Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'opencode'
+                   if runtime == 'opencode' else Path.home() / ('.' + runtime))
+        folder = Path(base).expanduser() if base else default
     return folder / settings_name(runtime)
 
 
@@ -303,8 +327,11 @@ def hookup_existing(home, runtime, runtime_home=None):
     home = Path(home).expanduser().resolve()
     if not (home / 'config/person.json').is_file():
         raise ValueError('no Foxrun install at ' + str(home) + ' (config/person.json is missing)')
-    chosen = RUNTIMES if runtime == 'both' else (runtime,)
-    missing = [str(home / 'hooks' / name / script) for name in chosen for script in SCRIPTS
+    chosen = ('claude', 'codex') if runtime == 'both' else (runtime,)
+    if any(name not in RUNTIMES for name in chosen):
+        raise ValueError('unknown runtime: ' + runtime)
+    missing = [str(home / 'hooks' / name / script) for name in chosen
+               for script in (('foxrun.mjs', 'bridge.py') if name == 'opencode' else SCRIPTS)
                if not (home / 'hooks' / name / script).is_file()]
     if missing:
         raise ValueError('hook scripts are missing; update the install first: ' + ', '.join(missing))

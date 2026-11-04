@@ -1,6 +1,6 @@
 """The native session store readers for runtime-session-search.
 
-Claude JSONL transcripts, Codex rollouts, and Hermes state.db files, read-only.
+Claude JSONL transcripts, Codex rollouts, Hermes state.db files, and OpenCode API records, read-only.
 Every path comes from the caller: a stores root (the person's home folder by
 default) and the runtime's own folders under it. Standard library only.
 
@@ -13,6 +13,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
+import base64
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 import re
 import shlex
@@ -69,6 +74,9 @@ ID_PREFIX_PATTERN = re.compile(r"^[0-9a-fA-F][0-9a-fA-F-]{7,}$")
 
 
 HERMES_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_[0-9a-fA-F]+$")
+
+
+OPENCODE_ID_PATTERN = re.compile(r"^ses_[A-Za-z0-9_-]+$")
 
 
 class StoreError(RuntimeError):
@@ -185,12 +193,16 @@ def _is_session_id_query(query: str) -> bool:
         UUID_PATTERN.fullmatch(value)
         or ID_PREFIX_PATTERN.fullmatch(value)
         or HERMES_ID_PATTERN.fullmatch(value)
+        or OPENCODE_ID_PATTERN.fullmatch(value)
     )
 
 
 def _session_id_match_kind(query: str, session_id: object) -> str | None:
     if not _is_session_id_query(query) or not isinstance(session_id, str):
         return None
+    if query.strip().startswith("ses_"):
+        requested = query.strip()
+        return "id_exact" if session_id == requested else "id_prefix" if session_id.startswith(requested) else None
     candidate = session_id.casefold()
     requested = query.strip().casefold()
     if candidate == requested:
@@ -1002,3 +1014,146 @@ def _format_transcript(last_user: str | None, last_assistant: str | None) -> str
     if last_assistant:
         parts.append(f"Assistant:\n{last_assistant}")
     return "\n\n".join(parts)
+
+def opencode_base() -> str:
+    base = os.environ.get("FOXRUN_OPENCODE_URL", "http://127.0.0.1:8081").rstrip("/")
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+        raise StoreError("FOXRUN_OPENCODE_URL must be an HTTP server URL without credentials or a query")
+    return base
+
+
+def opencode_get(path: str, *, directory: str | None = None, timeout: float = 5.0, **query):
+    """Read bounded JSON through OpenCode's supported API; never mutate a session."""
+    base = opencode_base()
+    if directory:
+        query["directory"] = directory
+    url = base + path + ("?" + urllib.parse.urlencode(query) if query else "")
+    headers = {"Accept": "application/json"}
+    password = os.environ.get("OPENCODE_SERVER_PASSWORD")
+    if password:
+        credentials = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode") + ":" + password
+        headers["Authorization"] = "Basic " + base64.b64encode(credentials.encode()).decode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+            raw = response.read(4 * 1024 * 1024 + 1)
+        if len(raw) > 4 * 1024 * 1024:
+            raise StoreError("OpenCode response exceeds the 4 MB read limit")
+        return json.loads(raw)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise StoreError("OpenCode returned HTTP " + str(error.code) + " for " + path) from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise StoreError("OpenCode server unavailable; start the configured server before searching its sessions") from error
+    except json.JSONDecodeError as error:
+        raise StoreError("OpenCode returned invalid JSON for " + path) from error
+
+
+def opencode_directories() -> list[str]:
+    """Search the current project and configured Foxrun workspaces."""
+    directories = [os.environ.get("FOXRUN_OPENCODE_DIRECTORY") or os.getcwd()]
+    portfolio = os.environ.get("FOXRUN_PORTFOLIO")
+    if portfolio:
+        root = Path(portfolio).expanduser()
+        if root.is_dir():
+            directories += [str(folder) for folder in sorted(root.iterdir())
+                            if folder.is_dir() and (folder / "AGENTS.md").is_file()]
+    return list(dict.fromkeys(directories))
+
+
+def opencode_message_texts(messages: object) -> list[tuple[str, str]]:
+    """Keep user and assistant text, excluding reasoning and tool parts."""
+    if not isinstance(messages, list):
+        raise StoreError("OpenCode messages response must be a list")
+    ordered = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or not isinstance(message.get("info"), dict):
+            continue
+        info = message["info"]
+        role = info.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        parts = message.get("parts", [])
+        if not isinstance(parts, list):
+            continue
+        text = "\n".join(part["text"] for part in parts if isinstance(part, dict)
+                         and part.get("type") == "text" and isinstance(part.get("text"), str)
+                         and not part.get("ignored"))
+        stamp = info.get("time", {}).get("created", index) if isinstance(info.get("time"), dict) else index
+        ordered.append((float(stamp) if isinstance(stamp, (int, float)) else index, index, role, text))
+    return [(role, text) for _, _, role, text in sorted(ordered) if text]
+
+
+def opencode_session_read(session_id: str):
+    if not OPENCODE_ID_PATTERN.fullmatch(session_id):
+        return None
+    path = "/session/" + urllib.parse.quote(session_id, safe="")
+    session = opencode_get(path)
+    if session is None:
+        return None
+    if not isinstance(session, dict) or session.get("id") != session_id:
+        raise StoreError("OpenCode did not return the requested exact session id")
+    messages = opencode_get(path + "/message", directory=session.get("directory"), limit=100)
+    texts = opencode_message_texts(messages)
+    last_user = next((text for role, text in reversed(texts) if role == "user"), None)
+    last_assistant = next((text for role, text in reversed(texts) if role == "assistant"), None)
+    directory = session.get("directory") if isinstance(session.get("directory"), str) else None
+    return (last_user, last_assistant), opencode_base() + path, directory
+
+
+def opencode_hits(query: str, room_map, home: Path, *, since_epoch: float = 0.0,
+                  limit: int = FIND_LIMIT, budget_seconds: float = 10.0):
+    deadline = time.monotonic() + budget_seconds
+    notes, hits, seen = [], [], set()
+    id_query = _is_session_id_query(query)
+    for directory in opencode_directories():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            notes.append("opencode_search_budget_exceeded; results may be incomplete")
+            break
+        try:
+            sessions = opencode_get("/session", directory=directory, timeout=remaining, limit=200)
+            if not isinstance(sessions, list):
+                raise StoreError("OpenCode session list response must be a list")
+            if len(sessions) >= 200:
+                notes.append("opencode_session_limit; searched the latest 200 sessions per project")
+            for session in sessions:
+                if not isinstance(session, dict):
+                    continue
+                ident = session.get("id")
+                if not isinstance(ident, str) or not OPENCODE_ID_PATTERN.fullmatch(ident) or ident in seen:
+                    continue
+                seen.add(ident)
+                stamp = session.get("time", {})
+                stamp = (stamp.get("updated") or stamp.get("created") or 0) if isinstance(stamp, dict) else 0
+                when = float(stamp) / 1000 if isinstance(stamp, (int, float)) else 0
+                title = session.get("title") if isinstance(session.get("title"), str) else ident
+                cwd = session.get("directory") if isinstance(session.get("directory"), str) else directory
+                if id_query:
+                    if not _session_id_match_kind(query, ident):
+                        continue
+                    texts = []
+                else:
+                    if when < since_epoch:
+                        continue
+                    texts = []
+                    if not _query_matches(query, title, cwd):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            notes.append("opencode_search_budget_exceeded; results may be incomplete")
+                            return hits, notes
+                        messages = opencode_get("/session/" + urllib.parse.quote(ident, safe="") + "/message",
+                                                directory=cwd, timeout=remaining, limit=100)
+                        texts = [text for _, text in opencode_message_texts(messages)]
+                        if not _query_matches(query, title, cwd, *texts):
+                            continue
+                command = shlex.join(["opencode", "attach", opencode_base(), "--session", ident, "--dir", cwd])
+                hits.append(_hit(store="opencode", session_id=ident, title=title, when=when, cwd=cwd,
+                                 room=room_label_for_cwd(cwd, room_map, home), pane_id=None, live=None,
+                                 surfaces=("opencode",), command=command, snippet=_snippet(query, texts)))
+                if len(hits) >= limit:
+                    return hits, notes
+        except StoreError as error:
+            notes.append("opencode: " + str(error))
+    return hits, notes

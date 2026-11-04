@@ -371,7 +371,9 @@ def parse(path: Path, until: datetime | None = None, tail_bytes: int | None = No
                     continue
             except ValueError:
                 pass
-        if result.source == "claude":
+        if row.get("runtime") == "opencode":
+            result.source = "opencode"
+        if result.source in ("claude", "opencode"):
             msg = row.get("message")
             if not isinstance(msg, dict):
                 continue
@@ -380,7 +382,7 @@ def parse(path: Path, until: datetime | None = None, tail_bytes: int | None = No
                 if isinstance(model, str) and model not in ("<synthetic>", "unknown"):
                     result.model = model
             content = msg.get("content")
-            if row.get("type") == "assistant":
+            if row.get("type") == "assistant" and not (row.get("runtime") == "opencode" and row.get("isMeta")):
                 result.assistant_text += " ".join(text_blocks(content)) + " "
             if row.get("type") == "user" and not row.get("isMeta") and not row.get("sourceToolUseID"):
                 result.add_user_turn(content, row.get("timestamp"))

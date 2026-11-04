@@ -4,7 +4,7 @@ description: The one menu for handing work between Claude, Codex, and Hermes. Sa
 ---
 # orchestrate
 
-Run `~/.foxrun/skills/orchestrate/bin/orchestrate resolve --from <claude|codex|hermes> --want <word|1-8> [--to <runtime>] [--task "..."] [--thread <codex-thread-id>] [--new-thread "<name>"] [--watch] [--design] [--run-dir <dir>] [--session-id <id>] [--desktop-owned] [--desktop-native] [--native-route <A1|A2|B|C|D|E>] [--check] [--hosted] [--cwd <dir>] [--room <room>] [--conversation <surface:id>] [--profile <name>]`. Use its route. `orchestrate grid` prints the menu. `orchestrate doctor [--hermes-profiles <names>]` checks local retirement state without changes. Extra Hermes profile names come from `~/.foxrun/config/orchestrate.local.json`. Never hand-roll a cross-runtime command that this program can resolve.
+Run `~/.foxrun/skills/orchestrate/bin/orchestrate resolve --from <claude|codex|hermes|opencode> --want <word|1-8> [--to <runtime>] [--task "..."] [--thread <codex-thread-id>] [--new-thread "<name>"] [--watch] [--design] [--run-dir <dir>] [--session-id <id>] [--desktop-owned] [--desktop-native] [--native-route <A1|A2|B|C|D|E>] [--check] [--hosted] [--cwd <dir>] [--room <room>] [--conversation <surface:id>] [--profile <name>]`. Use its route. `orchestrate grid` prints the menu. `orchestrate doctor [--hermes-profiles <names>]` checks local retirement state without changes. Extra Hermes profile names come from `~/.foxrun/config/orchestrate.local.json`. Never hand-roll a cross-runtime command that this program can resolve.
 
 ## The grid (rows = what you want, columns = where you are)
 
@@ -127,3 +127,9 @@ Use `--from hermes`. One-shot work to Claude uses `claude -p`; work to Codex use
 ## Changing this skill
 
 Before changing the resolver, capture the baseline fixture. Load the old and new resolver modules and compare `resolve()` for every caller, target, and row. Compare each result with the baseline fixture. Report the count and any intentional Claude thread-route difference.
+
+## OpenCode with a local model
+
+Use `--from opencode` when working in OpenCode. The default destination is OpenCode, using its configured provider. `FOXRUN_OPENCODE_MODEL`, when set, selects that provider/model explicitly. This route does not require a Claude or Codex login.
+
+The resolver returns `opencode run --format json`. Keep the native session ID to continue an idle session. Read and review routes deny tools that can change files; build routes retain OpenCode's configured permissions. Parallel work needs a separate session and disjoint brief for each tracked worker. A request to continue a session is not an interruption of a running turn.

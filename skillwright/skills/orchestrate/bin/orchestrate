@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 
-RUNTIMES = ("claude", "codex", "hermes")
+RUNTIMES = ("claude", "codex", "hermes", "opencode")
 
 ROWS: tuple[tuple[str, str, str], ...] = (
     # key, number, plain-English row name
@@ -62,6 +62,7 @@ READ_ONLY_CLAUDE_TOOLS = "Read,Glob,Grep"
 WRITE_CLAUDE_TOOLS = "Read,Edit,Write,Bash"
 
 CONVERSATION_HINT = {
+    "opencode": "opencode:<session-id>",
     "claude": "claude:$CLAUDE_CODE_SESSION_ID",
     "codex": "codex:<stable-thread-id> (in a Herdr pane: herdr:$HERDR_PANE_ID)",
     "hermes": "hermes:<session-id> (the gateway shell has no HERMES_SESSION_ID; pass it explicitly; Telegram: telegram:<chat>:<thread>)",
@@ -255,6 +256,8 @@ def _resolve_claude_thread(result: dict[str, object], caveats: list[str], *,
 
 def default_target(source: str, want: str) -> tuple[str, str]:
     """Pick --to when the caller did not. Returns (runtime, reason)."""
+    if source == "opencode":
+        return "opencode", "use the configured OpenCode provider and local model"
     if want in CODE_ROWS:
         return "codex", "code work goes to Codex (execution after a plan, repo work)"
     if source == "claude":
@@ -262,6 +265,69 @@ def default_target(source: str, want: str) -> tuple[str, str]:
     if source == "codex":
         return "claude", "judgement, writing, and review live with Claude"
     return "claude", "Hermes asks Claude for judgement; ask Codex for code"
+
+
+def validate_opencode_model(value, banned=()):
+    """Validate a provider-qualified model against qualified and bare bans."""
+    if (not isinstance(value, str) or
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*/[^\s\x00-\x1f\x7f]+', value)):
+        raise ResolveError('OpenCode model must use provider/model without whitespace or control characters')
+    model = value.split('/', 1)[1]
+    if model.startswith('/') or model.endswith('/') or '//' in model:
+        raise ResolveError('OpenCode model must use provider/model with non-empty path segments')
+    if value in banned or model in banned:
+        raise ResolveError('OpenCode model is banned by config/models.yaml: ' + value)
+    return value
+
+
+def opencode_model(tier="work"):
+    """Use Foxrun policy when installed; retain standalone OpenCode routing."""
+    home = Path(os.environ.get("FOXRUN_HOME", Path.home() / ".foxrun")).expanduser()
+    model = os.environ.get("FOXRUN_OPENCODE_MODEL")
+    if (home / "config/models.yaml").is_file() or (home / "config/person.json").is_file():
+        try:
+            sys.path.insert(0, str(home))
+            from base.agent_catalog import resolve_model
+            return resolve_model(tier, "opencode", home)
+        except (OSError, ImportError, ValueError) as error:
+            raise ResolveError("Cannot select an OpenCode model: " + str(error)) from error
+    return validate_opencode_model(model) if model else None
+
+
+def _resolve_opencode(result, want, task, cwd, session_id, workers):
+    """Use OpenCode's own sessions and tools with its configured provider."""
+    readonly = want in ("quick", "advise", "review", "grill")
+    if want == "steer" and not session_id:
+        result.update(status="session_required", reason="Name the OpenCode session to continue.")
+        return result
+    parts = ["opencode", "run", "--format", "json"]
+    model = opencode_model("code" if want in CODE_ROWS else "work")
+    if model:
+        parts += ["--model", model]
+    if session_id:
+        parts += ["--session", session_id]
+    parts += ["--", task]
+    command = " ".join(_q(part) for part in parts)
+    if readonly:
+        permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow"}
+        command = "OPENCODE_PERMISSION=" + _q(json.dumps(permissions)) + " " + command
+    if cwd:
+        command = "cd " + _q(cwd) + " && " + command
+    result.update(
+        command=command, mode="opencode-session", opens_window=False, status="resolved",
+        returns="OpenCode JSON events with the native session ID and tool results",
+        caveats=["Wait for the current turn to finish before resuming the same session.",
+                 "The configured provider handles inference; this route does not select a cloud provider."],
+        ladder={"more_work": "repeat with --session-id <id> after the turn finishes",
+                "steer": "continue the idle session by its native ID",
+                "done": "record the result and evidence in Foxrun; keep the session ID"},
+    )
+    if want == "parallel":
+        result["workers"] = max(1, workers)
+        result["caveats"].append("Start one command per disjoint brief through the host's tracked task tool; do not reuse a session ID across workers.")
+        if session_id:
+            result.update(status="refused", reason="Parallel workers need separate sessions; omit --session-id.")
+    return result
 
 
 def _claude_one_shot(want: str, task: str, cwd: str | None, session_id: str | None) -> str:
@@ -435,14 +501,21 @@ def resolve(
         "conversation_id": conversation or CONVERSATION_HINT[source],
     }
 
+    if to == "opencode":
+        if source == "claude" and want in ONE_SHOT_ROWS:
+            result["start"] = "tracked-background"
+        return _resolve_opencode(result, want, task, cwd, session_id, workers)
+
     if desktop_native and not hosted and to == "codex":
         route = "D" if check else (native_route or "C")
         return _resolve_codex_native(result, route, session_id)
 
     if to == "hermes" and want in CODE_ROWS and not (want == "parallel" and profile):
+        replacement_target = "opencode" if source == "opencode" else "codex"
+        replacement_session = None if source == "opencode" and want == "parallel" else session_id
         result.update({"status": "refused", "reason": HERMES_CHILD_RULE,
-                       "use_instead": resolve(source=source, want=want, to="codex", task=task,
-                                              session_id=session_id, cwd=cwd, room=room,
+                       "use_instead": resolve(source=source, want=want, to=replacement_target, task=task,
+                                              session_id=replacement_session, cwd=cwd, room=room,
                                               conversation=conversation, workers=workers,
                                               desktop_native=desktop_native, native_route=native_route,
                                               check=check, hosted=hosted)["command"]})

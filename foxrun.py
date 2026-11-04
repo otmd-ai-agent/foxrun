@@ -175,7 +175,7 @@ def installed_path(value):
 
 def check_generated_seat_paths(home):
     """Refuse runtime loaders that point at a seat the resolver no longer selects."""
-    for runtime, suffix in (('claude', '*.md'), ('codex', '*.toml')):
+    for runtime, suffix in (('claude', '*.md'), ('codex', '*.toml'), ('opencode', '*.md')):
         folder = local_path(home, 'agents/generated/' + runtime)
         for file in sorted(folder.glob(suffix)):
             text = local_path(home, file.relative_to(home).as_posix()).read_text(encoding='utf-8')
@@ -557,7 +557,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     wake = commands.add_parser('start')
     wake.add_argument('--workspace')
-    wake.add_argument('--runtime', choices=('claude', 'codex'))
+    wake.add_argument('--runtime', choices=('claude', 'codex', 'opencode'))
     wake.add_argument('--session-id')
     wake.add_argument('--hook-json', action='store_true')
     wake.add_argument('--function', default=os.environ.get('FOXRUN_FUNCTION'))
@@ -565,19 +565,19 @@ def main(argv=None):
     wake.add_argument('--run-dir', default=os.environ.get('FOXRUN_RUN_DIR'))
     seat = commands.add_parser('standing')
     seat.add_argument('--seat', required=True)
-    seat.add_argument('--runtime', choices=('claude', 'codex'), required=True)
+    seat.add_argument('--runtime', choices=('claude', 'codex', 'opencode'), required=True)
     seat.add_argument('--name', required=True)
     seat.add_argument('--workspace', required=True)
     seat.add_argument('--conversation', required=True)
-    seat.add_argument('--from', dest='caller', choices=('claude', 'codex', 'hermes'), default='codex')
+    seat.add_argument('--from', dest='caller', choices=('claude', 'codex', 'hermes', 'opencode'), default='codex')
     refresh = commands.add_parser('update', help='refresh an existing home from the current product source')
     update_home = Path.home() / '.foxrun' if paths.system_home() == ROOT and (ROOT / 'install.py').is_file() else paths.system_home()
     refresh.add_argument('--home', type=Path, default=update_home)
     refresh.add_argument('--source', type=Path, help='product folder; default: this one, then the recorded one')
     connect = commands.add_parser('hookup', help='connect the session hooks to an existing install; backs up the settings first')
-    connect.add_argument('--runtime', choices=('claude', 'codex', 'both'), required=True)
+    connect.add_argument('--runtime', choices=('claude', 'codex', 'both', 'opencode'), required=True)
     connect.add_argument('--runtime-home', type=Path,
-                         help='settings folder; default: CLAUDE_CONFIG_DIR or ~/.claude, CODEX_HOME or ~/.codex')
+                         help='settings folder; default: CLAUDE_CONFIG_DIR or ~/.claude, CODEX_HOME or ~/.codex; OPENCODE_CONFIG_DIR or ~/.config/opencode')
     connect.add_argument('--home', type=Path, default=update_home)
     connect.add_argument('--json', action='store_true', help='print the report as JSON')
     commands.add_parser('doctor')

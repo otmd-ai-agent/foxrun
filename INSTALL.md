@@ -65,6 +65,22 @@ Start names `avery`, `cedar-shop`, and the files to read.
 Exit code 0 means success.
 Continue with [GUIDE.md](GUIDE.md).
 
+## OpenCode
+
+OpenCode support in this branch uses its native skills, agents, sessions, and plugin hooks. The [Codespaces configuration](https://github.com/otmd-ai-agent/foxrun/blob/codex/codespaces-opencode/codespaces/README.md) supplies a local Docker Model Runner provider and opens OpenCode on private port 8081.
+
+For an existing OpenCode installation, run the source installer with `--runtime opencode`. Set `OPENCODE_CONFIG_DIR` when using a custom OpenCode configuration folder. The installer keeps other provider and permission settings. `--runtime both` still means Claude Code and Codex.
+
+```sh
+python3 install.py --home "$HOME/.foxrun" --portfolio "$HOME/foxrun" --yes --person avery --workspace cedar-shop --runtime opencode --no-schedule
+python3 "$HOME/.foxrun/foxrun.py" doctor
+python3 "$HOME/.foxrun/foxrun.py" hookup --runtime opencode
+```
+
+Replace the example name and workspace with your choices. Open that workspace as a new OpenCode project so it discovers the installed skills. Run `/foxrun-setup` to choose your agent threads. Memory hooks register through `opencode.json`; they use Foxrun's existing start, handoff, and settlement commands. OpenCode keeps the native session IDs.
+
+`FOXRUN_OPENCODE_MODEL=provider/model` selects the OpenCode model for all Foxrun tiers and includes it in session model guidance. Banned models remain blocked; the shipped policy file is unchanged. Codespaces sets this to its local Docker Model Runner model.
+
 ## Install with uv
 
 You can install Foxrun without a copy of the product folder.

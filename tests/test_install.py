@@ -32,6 +32,28 @@ import pwd
 OWNER = re.compile('|'.join(re.escape(value) for value in (account_name(), pwd.getpwuid(os.getuid()).pw_name)), re.I)
 
 
+def isolated_environment(user):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('FOXRUN_', 'XDG_', 'OPENCODE_'))
+           and key not in ('PYTHONPATH', 'PYTHONHOME', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'HERMES_HOME')}
+    env.update(HOME=str(user), PYTHONDONTWRITEBYTECODE='1')
+    return env
+
+
+class InstallerEnvironment(unittest.TestCase):
+    def test_runtime_selectors_cannot_escape_the_test_home(self):
+        selectors = ('CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'OPENCODE_CONFIG_DIR',
+                     'OPENCODE_CONFIG', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+                     'XDG_STATE_HOME', 'HERMES_HOME', 'FOXRUN_HOME')
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.dict(os.environ, {key: '/outside-test-home' for key in selectors}):
+                env = isolated_environment(Path(temp))
+            self.assertFalse(set(selectors).intersection(env))
+            with mock.patch.dict(os.environ, env, clear=True):
+                for runtime in ('claude', 'codex', 'opencode'):
+                    self.assertTrue(install.runtime_settings(runtime).is_relative_to(Path(temp)))
+
+
 class Installer(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='accept-')
@@ -41,9 +63,7 @@ class Installer(unittest.TestCase):
         self.user.mkdir()
         self.home = self.root / 'system'
         self.portfolio = self.root / 'portfolio'
-        self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith('FOXRUN_') and key not in ('PYTHONPATH','PYTHONHOME')}
-        self.env.update(HOME=str(self.user), PYTHONDONTWRITEBYTECODE='1')
+        self.env = isolated_environment(self.user)
         # Never the real launchd: every install in these tests loads its nightly job through this stub.
         self.launchctl_log = self.root / 'launchctl.log'
         stub = self.root / 'launchctl'
@@ -726,7 +746,7 @@ class Installer(unittest.TestCase):
         # The home is a test folder: a changed Hermes file is backed up under <home>/backups/ first.
         home=self.root/'opt/foxrun'
         home.mkdir(parents=True)
-        with mock.patch.dict(os.environ,{'HOME':str(self.user)}):
+        with mock.patch.dict(os.environ, self.env, clear=True):
             self.assertEqual(install.hermes_hookup(home),[])
             self.assertFalse((home/'backups').exists())
             self.assertEqual(list(self.user.iterdir()),[],'no Hermes, nothing written')

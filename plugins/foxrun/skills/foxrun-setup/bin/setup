@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import uuid
@@ -21,7 +22,7 @@ import uuid
 
 PARTS = ("questions", "threads", "hooks", "backup")
 WORKSPACE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
-RUNTIMES = ("claude", "codex", "both")
+RUNTIMES = ("claude", "codex", "opencode", "both")
 # Only these answers change here. A new name or a new workspace is a new install or a workspace job.
 SETTABLE = ("runtime", "default_workspace")
 THREAD = Path(__file__).resolve().parents[2] / "thread" / "bin" / "thread"
@@ -29,7 +30,8 @@ MEMORY_QUESTION = ("Turn on automatic memory? Your agent loads your open work at
                    "and saves where it left off before a long chat gets trimmed. Recommended.")
 WHAT = {"SessionStart": "loads your open work when a chat starts, and again after a long chat is trimmed",
         "PreCompact": "saves where the agent left off before a long chat is trimmed",
-        "SessionEnd": "closes the chat's run record when the chat ends"}
+        "SessionEnd": "closes the chat's run record when the chat ends",
+        "OpenCodePlugin": "loads open work, saves a handoff before compaction, and records each completed turn"}
 OLD_CORE = ("This Foxrun core has no hookup command yet. Update the core first (setup step 1), "
             "then answer the memory question again. Setup wrote no settings file.")
 
@@ -62,7 +64,7 @@ def portfolio(system, data):
 
 def runtimes(data):
     value = data.get("runtime", "both")
-    return ("claude", "codex") if value == "both" else (value,) if value in ("claude", "codex") else ()
+    return ("claude", "codex") if value == "both" else (value,) if value in ("claude", "codex", "opencode") else ()
 
 
 def questions(system):
@@ -72,7 +74,7 @@ def questions(system):
         open_items.append({"field": "name", "question": "What name should Foxrun use for you?",
                            "how": "a new name is a new install; do not change it here"})
     if data.get("runtime") not in RUNTIMES:
-        open_items.append({"field": "runtime", "question": "Which app reads your work: claude, codex, or both?",
+        open_items.append({"field": "runtime", "question": "Which app reads your work: claude, codex, opencode, or both Claude and Codex?",
                            "choices": list(RUNTIMES)})
     folder = portfolio(system, data)
     default = data.get("default_workspace")
@@ -102,6 +104,9 @@ def threads(system):
 
 
 def settings_path(runtime):
+    if runtime == "opencode":
+        folder = Path(os.environ.get("OPENCODE_CONFIG_DIR") or Path.home() / ".config/opencode").expanduser()
+        return folder / "opencode.json"
     base = os.environ.get("CLAUDE_CONFIG_DIR") if runtime == "claude" else os.environ.get("CODEX_HOME")
     folder = Path(base).expanduser() if base else Path.home() / ("." + runtime)
     return folder / ("settings.json" if runtime == "claude" else "hooks.json")
@@ -123,6 +128,19 @@ def hooks(system):
     report, open_items = [], []
     for runtime in runtimes(data):
         file = settings_path(runtime)
+        if runtime == "opencode":
+            plugin = (system / "hooks/opencode/foxrun.mjs").resolve().as_uri()
+            try:
+                data = json.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
+                if not isinstance(data, dict) or not isinstance(data.get("plugin", []), list):
+                    raise ValueError("expected an object with a plugin list")
+            except (OSError, ValueError) as error:
+                open_items.append({"runtime": runtime, "question": "Fix " + str(file) + ": " + str(error)})
+                continue
+            missing = [] if plugin in data.get("plugin", []) and (system / "hooks/opencode/foxrun.mjs").is_file() else [
+                {"event": "OpenCodePlugin", "script": plugin}]
+            report.append({"runtime": runtime, "settings": str(file), "missing": missing})
+            continue
         commands = {}
         if file.is_file() and not file.is_symlink():
             try:
@@ -149,10 +167,14 @@ def hooks(system):
 def answer_hooks(system, answer):
     """The person's answer to the memory question. Yes runs `foxrun.py hookup` for each runtime with
     missing hooks: it backs up the settings file, adds only the Foxrun entries, and keeps every other entry."""
-    report = hooks(system)["runtimes"]
+    state = hooks(system)
+    report = state["runtimes"]
     if answer == "no":
         return {"answer": "no", "written": False,
                 "note": "Automatic memory stays off. Run /foxrun-setup hooks to turn it on later."}
+    malformed = [item for item in state["open"] if item.get("runtime")]
+    if malformed:
+        raise ValueError(malformed[0]["question"])
     connect = [{"runtime": item["runtime"], "settings": item["settings"], **missing}
                for item in report for missing in item["missing"]]
     if not connect:
@@ -180,6 +202,9 @@ def answer_hooks(system, answer):
 
 
 def backup(system):
+    if os.environ.get("FOXRUN_EPHEMERAL") == "1":
+        return {"part": "backup", "nightly_on": False, "last_nightly": None, "state_remote": None,
+                "ephemeral": True, "note": "Not scheduled in this disposable Codespace.", "open": []}
     receipts = sorted((system / "runs/nightly").glob("*-nightly/receipt.json")) if (system / "runs/nightly").is_dir() else []
     last = None
     for receipt in reversed(receipts):
@@ -211,8 +236,14 @@ def backup(system):
     enabled = enabled or recent
     open_items = []
     if not enabled:
-        open_items.append({"question": "Turn on the nightly job?",
-                           "command": "python3 " + str(system / "cron/schedule.py") + " --on"})
+        if sys.platform == "darwin":
+            open_items.append({"question": "Turn on the nightly job?",
+                               "command": shlex.join(["python3", str(system / "cron/schedule.py"), "--on"])})
+        else:
+            open_items.append({"question": "Run the nightly maintenance job now? Automatic scheduling is not configured on this platform.",
+                               "command": shlex.join(["python3", str(system / "cron/nightly.py")]),
+                               "automatic": False,
+                               "how": "This runs once. It does not enable a schedule; a stopped Codespace cannot run jobs."})
     if last and last["result"] != "ok":
         open_items.append({"question": "The last nightly run failed. Look at runs/nightly/" + last["folder"] + "?"})
     if remote is None:
@@ -264,7 +295,7 @@ def main(argv=None):
     memory.add_argument("--answer", choices=("yes", "no"), required=True)
     change = commands.add_parser("set", help="change a setup answer in config/person.json")
     change.add_argument("--field", action="append", required=True, metavar="KEY=VALUE",
-                        help="runtime=claude|codex|both, or default_workspace=<workspace>")
+                        help="runtime=claude|codex|opencode|both, or default_workspace=<workspace>")
     change.add_argument("--dry-run", action="store_true", help="print the change; write nothing")
     args = parser.parse_args(argv)
     system = home()

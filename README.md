@@ -14,6 +14,14 @@ Free and open source. Built by an operator who runs multiple businesses from his
 
 <p align="center"><a href="#quick-start">Quick Start</a> · <a href="#the-problem">The problem</a> · <a href="#what-you-get">What you get</a> · <a href="#who-its-for">Who it's for</a> · <a href="#install">Install</a> · <a href="#faq">FAQ</a> · <a href="#why-i-built-it">Why I built it</a></p>
 
+## Try it in Codespaces
+
+[Open the OpenCode + local-model branch in Codespaces](https://codespaces.new/otmd-ai-agent/foxrun/tree/codex/codespaces-opencode?quickstart=1).
+
+This configuration runs OpenCode's browser interface on private port 8081 and serves a local Gemma model through Docker Model Runner. Start with `/foxrun-setup` to install Foxrun with your name and workspace, then use its agent seats, skills, work records, and session memory. It is intended for a disposable session of about an hour; nightly jobs are skipped.
+
+Read the [Codespaces setup](https://github.com/otmd-ai-agent/foxrun/blob/codex/codespaces-opencode/codespaces/README.md) for the browser password, first download, and validation status. Local model inference and automatic browser launch still need a fresh Codespace check.
+
 ## Quick Start
 
 > [!TIP]

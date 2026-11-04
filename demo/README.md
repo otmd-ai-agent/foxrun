@@ -2,15 +2,15 @@
 
 Try Foxrun before installing it on your machine: ask a small, self-hosted Gemma model to create a task and submit proof, review the result yourself, then find the saved record in a new chat. The demo runs real Foxrun task commands. You need no model API key and spend no paid model tokens; GitHub Codespaces compute and storage still count toward your account's quotas and billing.
 
-This is experimental. Docker execution passed the checks below in a cloud environment, but an actual GitHub Codespaces launch is still unverified.
+This is experimental. The demo has loaded in a browser from a GitHub Codespace. Automatic browser launch and the complete task workflow in Codespaces still need live verification.
 
 ## Open the demo
 
-[Open the demo branch in Codespaces](https://codespaces.new/otmd-ai-agent/foxrun?ref=demo%2Fcodespaces-gemma)
+[Open the demo branch in Codespaces](https://codespaces.new/otmd-ai-agent/foxrun?ref=codex%2Fcodespaces-editor-preview)
 
 1. Select a **4-core / 16 GB RAM** machine with at least **32 GB storage**. The configuration targets Linux x86-64.
 2. Allow the first startup to build the development container and download the **5.15 GB** model.
-3. Open forwarded **port 8080** when Codespaces offers it. The page shows setup progress. Keep the port **private**: the demo supports one visitor.
+3. Codespaces is configured to open forwarded **port 8081** in a separate browser tab at startup. If the tab does not open automatically, select **Open in Browser** on port 8081 in the **Ports** panel. The page shows setup progress. Keep the port **private**: the demo supports one visitor.
 
 Use synthetic information only. The demo stores tasks and proof in the codespace until you discard that storage; closing a chat does not erase them.
 
@@ -60,7 +60,7 @@ Before packaging, setup verifies the download from the pinned revision against H
 
 ## Development and checks
 
-The devcontainer runs two services: a Python development service and a Docker Model Runner sidecar. Only the UI port is forwarded. At startup, `postStartCommand` runs `demo/start.py`. This serves the page immediately while installation and model preparation continue in the background. Reopening a running demo does not start another server.
+The devcontainer runs two services: a Python development service and a Docker Model Runner sidecar. Only the UI port is forwarded. At startup, `postStartCommand` runs `demo/start.py`. This serves the page immediately while installation and model preparation continue in the background. Reopening a running demo does not start another server. Chat submissions return immediately with a request ID; the page polls for the result while Gemma runs. Reloading the page recovers the current request while the server stays running. Recent request IDs prevent duplicate submissions within that server process. Restarting the server clears chat requests and history, but keeps saved task records.
 
 ```sh
 # In the devcontainer, if the page needs starting:
@@ -74,6 +74,10 @@ docker compose -f .devcontainer/compose.yaml config --quiet
 ```
 
 If setup fails, read the log named on the page. Setup logs are `/tmp/foxrun-demo/prepare.log`, `install.log`, `doctor.log`, and `model-load.log`. A failed initial install can leave partial files; rebuild the demo container to start with empty disposable folders. The page does not silently substitute a hosted model.
+
+The server defaults to port 8081, matching the forwarded browser port in `.devcontainer/devcontainer.json`. `PORT` overrides the listener for development; forward the same port when using an override. Changes to the devcontainer configuration apply to a new or rebuilt container, so pulling a change does not change an existing forwarding entry.
+
+Use the separate browser tab for the demo. Embedded editor previews failed in live testing, including “github.com refused to connect” and blank pages. The startup configuration uses `onAutoForward: "openBrowser"` to open the demo outside the editor.
 
 Normal Codespaces setup needs no environment overrides. For development, `MODEL_RUNNER_HOST` selects the sidecar and `FOXRUN_DEMO_ROOT` selects isolated demo storage. For controlled tests only, `DMR_BIN` can name an existing CLI and `FOXRUN_DEMO_MODEL_FILE` can reuse a downloaded GGUF. Setup still verifies that file's checksum.
 
@@ -90,4 +94,4 @@ Local Gemma made a real task-creation call in approximately **26 seconds cold** 
 
 The **5.15 GB** model download took about **4 minutes 27 seconds** over this environment's connection. The loaded llama-server process used approximately **7.4 GiB RSS**. Docker's container-wide memory statistics were unreliable in this rootless test environment.
 
-The Codespaces machine API returned **403 Resource not accessible by integration**, preventing this session from provisioning an actual GitHub Codespace. Launching this branch in Codespaces remains the next acceptance check.
+The Codespaces machine API returned **403 Resource not accessible by integration**, preventing automated live validation in this session. User-provided checks confirmed that the queried page and health endpoint returned HTTP 200 in Codespaces, and the page loaded in a regular browser tab. A later live chat attempt showed an empty JSON response and lost state connection; the original logs were unavailable after the Codespace was reset. A controlled slow-model test reproduced a dropped long-running HTTP response. The updated server acknowledges chat requests immediately, and Chromium checks cover lost acknowledgements, page reloads, empty and non-JSON responses, and model errors without resubmitting the request. These tests use a mocked model. Automatic browser launch and the complete task workflow still need live verification.

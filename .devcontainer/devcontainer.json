@@ -4,9 +4,32 @@
   "service": "demo",
   "workspaceFolder": "/workspaces/foxrun",
   "remoteUser": "vscode",
-  "hostRequirements": {"cpus": 4, "memory": "16gb", "storage": "32gb"},
-  "forwardPorts": [8080],
-  "portsAttributes": {"8080": {"label": "Foxrun demo (private)", "onAutoForward": "openBrowser", "visibility": "private"}},
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [
+    8081
+  ],
+  "portsAttributes": {
+    "8081": {
+      "label": "Foxrun demo (private)",
+      "onAutoForward": "openBrowser",
+      "protocol": "http",
+      "visibility": "private"
+    }
+  },
   "postStartCommand": "python3 demo/start.py",
-  "shutdownAction": "stopCompose"
+  "shutdownAction": "stopCompose",
+  "waitFor": "postStartCommand",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "workbench.startupEditor": "none",
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
+        "chat.disableAIFeatures": true
+      }
+    }
+  }
 }

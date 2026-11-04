@@ -60,7 +60,7 @@ Before packaging, setup verifies the download from the pinned revision against H
 
 ## Development and checks
 
-The devcontainer runs two services: a Python development service and a Docker Model Runner sidecar. Only the UI port is forwarded. At startup, `postStartCommand` runs `demo/start.py`. This serves the page immediately while installation and model preparation continue in the background. Reopening a running demo does not start another server.
+The devcontainer runs two services: a Python development service and a Docker Model Runner sidecar. Only the UI port is forwarded. At startup, `postStartCommand` runs `demo/start.py`. This serves the page immediately while installation and model preparation continue in the background. Reopening a running demo does not start another server. Chat submissions return immediately with a request ID; the page polls for the result while Gemma runs. Reloading the page recovers the current request while the server stays running. Recent request IDs prevent duplicate submissions within that server process. Restarting the server clears chat requests and history, but keeps saved task records.
 
 ```sh
 # In the devcontainer, if the page needs starting:
@@ -94,4 +94,4 @@ Local Gemma made a real task-creation call in approximately **26 seconds cold** 
 
 The **5.15 GB** model download took about **4 minutes 27 seconds** over this environment's connection. The loaded llama-server process used approximately **7.4 GiB RSS**. Docker's container-wide memory statistics were unreliable in this rootless test environment.
 
-The Codespaces machine API returned **403 Resource not accessible by integration**, preventing automated live validation in this session. User-provided checks confirmed that the queried page and health endpoint returned HTTP 200 in Codespaces, and the page loaded in a regular browser tab. The embedded editor preview and complete task workflow still need live verification.
+The Codespaces machine API returned **403 Resource not accessible by integration**, preventing automated live validation in this session. User-provided checks confirmed that the queried page and health endpoint returned HTTP 200 in Codespaces, and the page loaded in a regular browser tab. A later live chat attempt showed an empty JSON response and lost state connection; the original logs were unavailable after the Codespace was reset. A controlled slow-model test reproduced a dropped long-running HTTP response. The updated server acknowledges chat requests immediately, and Chromium checks cover lost acknowledgements, page reloads, empty and non-JSON responses, and model errors without resubmitting the request. These tests use a mocked model. The embedded editor preview and complete task workflow still need live verification.

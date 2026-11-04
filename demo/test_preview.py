@@ -65,6 +65,76 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(json.loads(body), {'ok': True})
 
 
+    def test_chat_acknowledges_before_model_and_recovers_result(self):
+        entered, release = threading.Event(), threading.Event()
+        result = {'answer': 'Saved proof', 'events': [], 'seconds': 1, 'completion_tokens': 2}
+
+        def slow_chat(*args):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError('Test model was not released')
+            return result
+
+        headers = {'Content-Type': 'application/json', 'X-Foxrun-Demo': '1'}
+        body = json.dumps({'message': 'test', 'request_id': 'a' * 32})
+        with patch.object(server, 'status', return_value={'ready': True}), \
+             patch.object(server.agent, 'tasks', return_value=[]), \
+             patch.object(server.agent, 'chat', side_effect=slow_chat) as model:
+            try:
+                code, _, data = self.request('POST', '/api/chat', body, headers)
+                self.assertEqual(code, 202)
+                self.assertTrue(entered.wait(1))
+                self.assertEqual(json.loads(data)['status'], 'running')
+                self.assertEqual(self.request('GET', '/api/health')[0], 200)
+                state = json.loads(self.request('GET', '/api/state')[2])
+                self.assertEqual(state['chat']['status'], 'running')
+                self.assertEqual(self.request('POST', '/api/chat', body, headers)[0], 202)
+                other = json.dumps({'message': 'another', 'request_id': 'b' * 32})
+                self.assertEqual(self.request('POST', '/api/chat', other, headers)[0], 409)
+                self.assertEqual(self.request('POST', '/api/new-chat', '{}', headers)[0], 409)
+                self.assertEqual(self.request('POST', '/api/accept', '{}', headers)[0], 409)
+            finally:
+                release.set()
+                acquired = server.LOCK.acquire(timeout=6)
+                if acquired: server.LOCK.release()
+                self.assertTrue(acquired)
+            state = json.loads(self.request('GET', '/api/state')[2])
+            self.assertEqual(state['chat']['status'], 'complete')
+            self.assertEqual(state['chat']['result'], result)
+            self.assertEqual(self.request('POST', '/api/chat', body, headers)[0], 200)
+            self.assertEqual(model.call_count, 1)
+            changed = json.dumps({'message': 'different', 'request_id': 'a' * 32})
+            self.assertEqual(self.request('POST', '/api/chat', changed, headers)[0], 409)
+            self.assertEqual(self.request('POST', '/api/new-chat', '{}', headers)[0], 200)
+            self.assertIsNone(json.loads(self.request('GET', '/api/state')[2])['chat'])
+
+    def test_chat_failure_is_recoverable_and_invalid_requests_do_not_run(self):
+        headers = {'Content-Type': 'application/json', 'X-Foxrun-Demo': '1'}
+        with patch.object(server, 'status', return_value={'ready': True}), \
+             patch.object(server.agent, 'tasks', return_value=[]), \
+             patch.object(server.agent, 'chat', side_effect=RuntimeError('Model unavailable')) as model:
+            for body in [{'message': 'test'}, {'message': '', 'request_id': 'c' * 32}]:
+                self.assertEqual(self.request('POST', '/api/chat', json.dumps(body), headers)[0], 400)
+            model.assert_not_called()
+            body = json.dumps({'message': 'test', 'request_id': 'c' * 32})
+            self.assertEqual(self.request('POST', '/api/chat', body, headers)[0], 202)
+            acquired = server.LOCK.acquire(timeout=3)
+            if acquired: server.LOCK.release()
+            self.assertTrue(acquired)
+            state = json.loads(self.request('GET', '/api/state')[2])
+            self.assertEqual(state['chat']['status'], 'failed')
+            self.assertEqual(state['chat']['error'], 'Model unavailable')
+            self.assertEqual(self.request('POST', '/api/new-chat', '{}', headers)[0], 200)
+
+    def test_state_failure_returns_json(self):
+        with patch.object(server, 'status', return_value={'ready': True}), \
+             patch.object(server.agent, 'tasks', side_effect=OSError('Test database failure')):
+            code, headers, body = self.request('GET', '/api/state')
+        self.assertEqual(code, 500)
+        self.assertEqual(headers['Content-Type'], 'application/json')
+        self.assertIn('Could not read demo state', json.loads(body)['error'])
+
+
 class StartupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='foxrun-preview-start-')

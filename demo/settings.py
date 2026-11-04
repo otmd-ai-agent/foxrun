@@ -1,6 +1,7 @@
 """Pinned local demo configuration. No model API key is read or required."""
 import os
 from pathlib import Path
+PORT = int(os.environ.get('PORT', '8080'))
 SOURCE = Path(__file__).resolve().parents[1]
 ROOT = Path(os.environ.get('FOXRUN_DEMO_ROOT', '/tmp/foxrun-demo')).resolve()
 SYSTEM = ROOT / 'system'

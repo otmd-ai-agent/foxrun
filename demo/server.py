@@ -6,6 +6,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 from settings import *
 import agent
 
@@ -21,10 +22,12 @@ class Handler(BaseHTTPRequestHandler):
     def reply(self,data,code=200):
         body=json.dumps(data).encode();self.send_response(code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(body)
     def do_GET(self):
-        if self.path=='/api/health':return self.reply({'application':'foxrun-demo'})
-        if self.path=='/api/state':return self.reply({'setup':status(),'tasks':agent.tasks() if status().get('ready') else [],'events':EVENTS[-12:]})
-        if self.path!='/':return self.reply({'error':'Not found'},404)
-        body=(SOURCE/'demo/index.html').read_bytes();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(body)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");self.end_headers();self.wfile.write(body)
+        # Simple Browser adds a cache-busting query parameter to the page URL.
+        path = urlsplit(self.path).path
+        if path=='/api/health':return self.reply({'application':'foxrun-demo'})
+        if path=='/api/state':return self.reply({'setup':status(),'tasks':agent.tasks() if status().get('ready') else [],'events':EVENTS[-12:]})
+        if path!='/':return self.reply({'error':'Not found'},404)
+        body=(SOURCE/'demo/index.html').read_bytes();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(body)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self' https://*.github.dev https://github.dev https://*.vscode-cdn.net; base-uri 'none'");self.end_headers();self.wfile.write(body)
     def do_POST(self):
         # Cross-origin forms cannot supply this header; we grant no CORS preflight.
         if self.headers.get('X-Foxrun-Demo')!='1' or self.headers.get('Content-Type')!='application/json':return self.reply({'error':'Expected a same-site JSON request'},403)
@@ -53,6 +56,6 @@ def main():
     ROOT.mkdir(parents=True,exist_ok=True)
     with (ROOT/'prepare.log').open('a') as log:
         subprocess.Popen([sys.executable,str(SOURCE/'demo/prepare.py')],stdout=log,stderr=log)
-    ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT','8080'))),Handler).serve_forever()
+    ThreadingHTTPServer(('0.0.0.0',PORT),Handler).serve_forever()
 
 if __name__=='__main__':main()

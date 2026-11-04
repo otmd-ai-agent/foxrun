@@ -31,7 +31,7 @@ def main():
     deadline = time.monotonic() + 10
     while process.poll() is None and time.monotonic() < deadline:
         if healthy():
-            print(f'Foxrun demo is running at http://127.0.0.1:{PORT}. Open its private port with Preview in Editor.')
+            print(f'Foxrun demo is running at http://127.0.0.1:{PORT}. Open its private port with Open in Browser.')
             print('First launch downloads a 5.15 GB local model; the page shows setup progress.')
             return 0
         time.sleep(0.2)

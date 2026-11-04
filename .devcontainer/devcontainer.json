@@ -15,7 +15,7 @@
   "portsAttributes": {
     "8081": {
       "label": "Foxrun demo (private)",
-      "onAutoForward": "openPreview",
+      "onAutoForward": "openBrowser",
       "protocol": "http",
       "visibility": "private"
     }

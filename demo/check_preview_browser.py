@@ -16,7 +16,7 @@ from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 import server
 
-APP = 'https://demo-8080.app.github.dev'
+APP = 'https://demo-8081.app.github.dev'
 EDITOR = 'https://demo.github.dev'
 
 

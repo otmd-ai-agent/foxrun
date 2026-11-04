@@ -10,10 +10,10 @@
     "storage": "32gb"
   },
   "forwardPorts": [
-    8080
+    8081
   ],
   "portsAttributes": {
-    "8080": {
+    "8081": {
       "label": "Foxrun demo (private)",
       "onAutoForward": "openPreview",
       "protocol": "http",

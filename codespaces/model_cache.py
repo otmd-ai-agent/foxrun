@@ -31,7 +31,7 @@ def require_space(path, operation):
         raise RuntimeError(
             f'{operation} needs {required / 1e9:.2f} GB free; '
             f'{available / 1e9:.2f} GB is available on {path}. '
-            'Use a Codespace with at least 64 GB storage and enough free space, then retry.'
+            'Free space on this Codespace, or choose a larger machine if your account offers one, then retry.'
         )
 
 

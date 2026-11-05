@@ -6,7 +6,7 @@ This is intended for a disposable session of about an hour. The configuration sk
 
 ## Start
 
-1. Create a Codespace from the branch containing this configuration. Use a Linux x86-64 machine with at least 4 CPUs, 16 GB RAM, and 64 GB storage.
+1. Create a Codespace from the branch containing this configuration. Use a Linux x86-64 machine with at least 4 CPUs, 16 GB RAM, and 32 GB storage.
 2. Wait for the container image. Its first build downloads and verifies the **5.15 GB** model. A ready Codespaces prebuild reuses that image. The editor can open while startup imports the cached file into Docker Model Runner. OpenCode starts after the import; startup does not download weights from Hugging Face.
 3. The editor is configured to detect port **8081** and open it in a separate browser tab. If the tab does not open, choose **Ports → 8081 → Open in Browser**. Keep the port private and its protocol HTTP; GitHub supplies the browser's HTTPS address.
 4. Sign in to OpenCode with username `opencode`. Show your generated password in the Codespaces terminal:
@@ -22,7 +22,7 @@ OpenCode runs commands and edits files with the Codespace user's permissions. It
 
 ## Storage and configuration
 
-Allow space for both the 5.15 GB image cache and Model Runner's imported copy, plus the container images, repository, and tools. The configuration requests at least 64 GB storage. Each model preparation step also checks for about 6.23 GB of free space and reports the available space if it cannot continue. A prebuild reduces download time; it does not remove these storage requirements.
+Allow space for both the 5.15 GB image cache and Model Runner's imported copy, plus the container images, repository, and tools. The configuration requests 32 GB storage so the available 4-core machine remains selectable. This is total capacity, not a guarantee of free space. Each model preparation step also checks for about 6.23 GB of free space and reports the available space if it cannot continue. A prebuild reduces download time; it does not remove these storage requirements.
 
 The container account's home is `/workspaces/foxrun-state/user`. Startup creates checked `~/.foxrun` and `~/foxrun` aliases to the installed system and portfolio, so existing product skills that use those default paths reach the same records. Startup refuses conflicting paths and never changes the caller's home environment. A rebuild is required to adopt this account-home setting.
 
@@ -50,7 +50,7 @@ See [GitHub's prebuild configuration guide](https://docs.github.com/en/codespace
 
 ## Checks and troubleshooting
 
-If an older revision entered recovery mode with `Model setup needs at least 11.4 GB free`, both services may already have started: the model startup check failed afterward. Update this branch with `git pull --ff-only`. On [your Codespaces page](https://github.com/codespaces), check storage capacity and usage. If needed, use the Codespace's **… → Change machine type** menu to select at least 64 GB storage, then rebuild the container. Rebuilding alone does not request a larger machine. See [GitHub's machine-type guide](https://docs.github.com/en/codespaces/customizing-your-codespace/changing-the-machine-type-for-your-codespace?tool=webui). A larger machine may have a higher billing rate.
+If an older revision entered recovery mode with `Model setup needs at least 11.4 GB free`, both services may already have started: the model startup check failed afterward. Update this branch with `git pull --ff-only`. On [your Codespaces page](https://github.com/codespaces), check storage capacity and usage. If space is still low, remove only files you no longer need, or choose a larger machine through **… → Change machine type** if your account offers one. Then rebuild the container. The available machine types depend on the account and organization policy; this repository's agent account currently offers only 32 GB machines. Rebuilding alone does not increase capacity. See [GitHub's machine-type guide](https://docs.github.com/en/codespaces/customizing-your-codespace/changing-the-machine-type-for-your-codespace?tool=webui). A larger machine may have a higher billing rate.
 
 If the editor's creation-log command is unavailable, read the log in the recovery terminal:
 

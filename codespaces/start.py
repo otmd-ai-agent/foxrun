@@ -2,7 +2,6 @@
 import argparse
 import base64
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,9 +15,10 @@ import urllib.request
 
 SOURCE = Path(__file__).resolve().parents[1]
 MODEL = 'foxrun/gemma4-e4b:qat-q4_0-32k'
-MODEL_URL = 'https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/4b4a2c1d584be7264f87aac328a1bc739ce81b6c/gemma-4-E4B_q4_0-it.gguf'
-MODEL_SHA256 = '676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee'
-MODEL_BYTES = 5154941280
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import model_cache
+
+MODEL_BYTES = model_cache.MODEL_BYTES
 CONTEXT = 32768
 OPENCODE_VERSION = '1.19.5'
 
@@ -184,37 +184,15 @@ def ensure_model(state, env):
     dmr = env.get('DMR_BIN', 'dmr')
     if subprocess.run([dmr, 'inspect', MODEL], env=env, capture_output=True).returncode == 0:
         return
-    supplied = env.get('FOXRUN_MODEL_FILE')
-    model_file = Path(supplied).resolve() if supplied else state / 'model.gguf'
-    if not model_file.exists():
-        if supplied:
-            raise RuntimeError('FOXRUN_MODEL_FILE does not exist.')
-        if shutil.disk_usage(state).free < 2 * MODEL_BYTES + 1024**3:
-            raise RuntimeError('Model setup needs at least 11.4 GB free for the download and DMR copy.')
-        print('Downloading the pinned local Gemma model (5.15 GB).', flush=True)
-        partial = state / 'model.partial'
-        with urllib.request.urlopen(MODEL_URL, timeout=120) as src, partial.open('wb') as out:
-            total, reported = 0, -1
-            while chunk := src.read(4 * 1024**2):
-                out.write(chunk)
-                total += len(chunk)
-                percent = int(100 * total / MODEL_BYTES)
-                if percent // 10 != reported:
-                    print(f'Model download: {percent}%.', flush=True)
-                    reported = percent // 10
-        partial.replace(model_file)
-    digest = hashlib.sha256()
-    with model_file.open('rb') as stream:
-        while chunk := stream.read(8 * 1024**2):
-            digest.update(chunk)
-    if digest.hexdigest() != MODEL_SHA256:
-        raise RuntimeError('Model checksum mismatch. Remove the incomplete download and retry.')
-    print('Loading the verified model into Docker Model Runner.', flush=True)
+    model_file = Path(env.get('FOXRUN_MODEL_FILE') or model_cache.CACHED_MODEL).resolve()
+    model_cache.verify(model_file)
+    if shutil.disk_usage(state).free < MODEL_BYTES + 1024**3:
+        raise RuntimeError('Model import needs at least 6.2 GB free for the Model Runner copy.')
+    print('Importing the model from the image cache into Docker Model Runner.', flush=True)
     with (state / 'model-load.log').open('a') as log:
         subprocess.run([dmr, 'package', '--gguf', str(model_file), '--context-size', str(CONTEXT), MODEL],
                        env=env, stdout=log, stderr=log, check=True)
-    if not supplied:
-        model_file.unlink()
+    print('Model Runner import finished.', flush=True)
 
 
 def start(state, port, user_home=None):

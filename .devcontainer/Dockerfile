@@ -18,5 +18,11 @@ RUN --mount=type=secret,id=proxy_ca \
     && chmod 755 /usr/local/bin/opencode \
     && mkdir -p /workspaces/foxrun-state \
     && chown vscode:vscode /workspaces/foxrun-state
+# Store public model weights in an image layer, outside the per-Codespace volumes.
+COPY codespaces/model_cache.py /usr/local/lib/foxrun/model_cache.py
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    python3 /usr/local/lib/foxrun/model_cache.py
+ENV FOXRUN_MODEL_FILE=/opt/foxrun-model/model.gguf
 USER vscode
 WORKDIR /workspaces/foxrun

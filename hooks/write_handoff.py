@@ -374,7 +374,8 @@ def main(argv=None):
         session = args.session or hook.get("session_id") or None
         transcript = args.transcript or hook.get("transcript_path") or None
         trigger = args.trigger or hook.get("trigger") or None
-        runtime = ("hermes" if hook.get("hook_event_name") in ("pre_llm_call", "pre_auxiliary_call", "post_auxiliary_call")
+        runtime = ("opencode" if hook.get("runtime") == "opencode" else
+                   "hermes" if hook.get("hook_event_name") in ("pre_llm_call", "pre_auxiliary_call", "post_auxiliary_call")
                    else "codex" if ("turn_id" in hook or (transcript and Path(transcript).name.startswith("rollout-"))) else "claude")
         if not session and not transcript:
             warn("no session_id and no transcript_path; no handoff written")

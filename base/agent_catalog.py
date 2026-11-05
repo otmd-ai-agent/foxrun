@@ -70,7 +70,21 @@ def expand(data, path):
     return resolved
 
 
-# Model choices have one writer: config/models.yaml. Consumers keep their own effort.
+def validate_opencode_model(value, banned=()):
+    """Validate a provider-qualified model against qualified and bare bans."""
+    import re
+    if (not isinstance(value, str) or
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*/[^\s\x00-\x1f\x7f]+', value)):
+        raise ValueError('OpenCode model must use provider/model without whitespace or control characters')
+    model = value.split('/', 1)[1]
+    if model.startswith('/') or model.endswith('/') or '//' in model:
+        raise ValueError('OpenCode model must use provider/model with non-empty path segments')
+    if value in banned or model in banned:
+        raise ValueError('OpenCode model is banned by config/models.yaml: ' + value)
+    return value
+
+
+# The policy file supplies defaults; an explicit OpenCode model selects its local provider.
 def model_policy(home=None):
     import os
     root = Path(home or os.environ.get('FOXRUN_HOME', Path.home() / '.foxrun'))
@@ -87,15 +101,25 @@ def model_policy(home=None):
     if set(data['tiers']) != {'judgment', 'work', 'cheap', 'code'}:
         raise ValueError('expected judgment, work, cheap, and code tiers')
     for tier, runtimes in data['tiers'].items():
-        if not isinstance(runtimes, dict) or set(runtimes) != {'claude', 'codex', 'hermes'}:
+        if (not isinstance(runtimes, dict) or not {'claude', 'codex', 'hermes'}.issubset(runtimes)
+                or not set(runtimes).issubset({'claude', 'codex', 'hermes', 'opencode'})):
             raise ValueError('each tier must name every runtime: ' + tier)
         for runtime, entry in runtimes.items():
             if entry is None:
                 continue
             if not isinstance(entry, dict) or entry.get('model') not in allowed:
                 raise ValueError('unallowed model: ' + tier + '/' + runtime)
+            if runtime == 'opencode':
+                validate_opencode_model(entry['model'], banned)
             if 'reasoning_effort' in entry or 'effort' in entry:
                 raise ValueError('effort belongs to the squad role: ' + tier + '/' + runtime)
+    opencode_model = os.environ.get('FOXRUN_OPENCODE_MODEL', '')
+    if opencode_model:
+        validate_opencode_model(opencode_model, banned)
+        if opencode_model not in allowed:
+            allowed.append(opencode_model)
+        for runtimes in data['tiers'].values():
+            runtimes['opencode'] = {'model': opencode_model}
     return data
 
 

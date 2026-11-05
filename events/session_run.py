@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Log tracked Claude and Codex sessions on a standing task."""
+"""Log tracked agent sessions on a standing task."""
 
 from __future__ import annotations
 
@@ -240,7 +240,7 @@ def parser() -> argparse.ArgumentParser:
     backfill_command.add_argument("--db", required=True)
     backfill_command.add_argument("--task", required=True)
     start_command = commands.add_parser("start")
-    start_command.add_argument("--runtime", choices=("claude", "codex"), required=True)
+    start_command.add_argument("--runtime", choices=("claude", "codex", "opencode"), required=True)
     start_command.add_argument("--session", required=True)
     start_command.add_argument("--cwd")
     start_command.add_argument("--model")
@@ -254,7 +254,7 @@ def parser() -> argparse.ArgumentParser:
     end_command.add_argument("--transcript", help=argparse.SUPPRESS)
     for name in ("hook-start", "hook-end"):
         hook = commands.add_parser(name, help=argparse.SUPPRESS)
-        hook.add_argument("--runtime", choices=("claude", "codex"), required=True)
+        hook.add_argument("--runtime", choices=("claude", "codex", "opencode"), required=True)
     return result
 
 

@@ -1,18 +1,18 @@
 ---
 name: runtime-session-search
-description: "Find a past agent session by words or id in Claude, Codex, or Hermes (every profile), read its final reply, and return the native session id so orchestrate can resume it. Use when the person asks what happened before, what was tried before, how a problem was worked across sessions, where a session went, what an agent last said, or wants to pick up old work. Reads the runtimes' own session files directly, read-only; needs no hosted pane."
+description: "Find a past agent session by words or id in Claude, Codex, Hermes (every profile), or OpenCode, read its final reply, and return the native session id so orchestrate can resume it. Use when the person asks what happened before, what was tried before, how a problem was worked across sessions, where a session went, what an agent last said, or wants to pick up old work. Reads native session files and OpenCode's supported API, read-only; needs no hosted pane."
 kind: tool
 ---
 
 # runtime-session-search
 
-`bin/runtime-session-search` reads the session files each runtime keeps under the home folder and prints JSON.
+`bin/runtime-session-search` reads native session files and the configured OpenCode server, then prints JSON.
 Summarize the JSON for the person; never paste it raw.
 It needs no other skill. The store readers ship beside it in `lib/session_stores.py`.
 
 | Verb | What it does |
 |---|---|
-| `find "<words or id>" [--runtime claude\|codex\|hermes] [--since 90d\|all] [--limit 15]` | Hits across Claude JSONL, Codex rollouts, and Hermes `state.db` (main and every profile). Ids rank above words. Each hit carries `session_id`, `store`, `profile`, `when`, `cwd`, `attach_or_resume_cmd`, `read_with`, `orchestrate_with`. |
+| `find "<words or id>" [--runtime claude\|codex\|hermes\|opencode] [--since 90d\|all] [--limit 15]` | Hits across Claude JSONL, Codex rollouts, Hermes `state.db` (main and every profile), and native OpenCode sessions. Ids rank above words. Each hit carries `session_id`, `store`, `profile`, `when`, `cwd`, `attach_or_resume_cmd`, `read_with`, `orchestrate_with`. |
 | `read <exact-native-id> [--runtime …] [--profile …]` | The last user message and the final assistant reply, 8 KB or 120 lines at most. Reasoning and tool payloads stay out. `resume_with` is included. |
 | `check-memex` | Whether memex passes the exact capability check and its index is fresh. |
 
@@ -32,6 +32,7 @@ Question mode: when the person asks a question about past work ("what did we try
 ## Laws
 
 - Native files are truth: `~/.claude/projects`, `~/.codex/sessions`, `~/.hermes/state.db`, and `~/.hermes/profiles/*/state.db`, read-only. `--stores-root` (or `RUNTIME_SESSION_SEARCH_STORES`) points at another home folder.
+- OpenCode uses read-only HTTP requests to `FOXRUN_OPENCODE_URL` (default `http://127.0.0.1:8081`) with `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD` when set. Its server must be running. Search covers the current directory (or `FOXRUN_OPENCODE_DIRECTORY`) and workspace folders under `FOXRUN_PORTFOLIO`. It checks up to 200 recent sessions per project and 100 messages per session within a ten-second search budget; `adapter_notes` reports limits or connection errors. An exact-id read returns that session's latest visible messages.
 - memex is a speed layer only when `check-memex` passes and its index is not older than the newest transcript by a day. Otherwise the built-in readers run. memex is optional; the skill works without it.
 - Missing or ambiguous matches stay explicit: `not_found`, `choice_required` (several ids match a prefix, or several stores hold the id), `no_reply`. Never guess; ask for the exact id or runtime.
 - Saved text never proves task success (`task_success: not_inferred`).
@@ -39,6 +40,7 @@ Question mode: when the person asks a question about past work ("what did we try
 
 ## Gotchas
 
+- OpenCode is searched automatically when `FOXRUN_OPENCODE_URL` is set, or explicitly with `--runtime opencode`. Its hits include a native `opencode attach ... --session <id> --dir <workspace>` command. Search never executes that command.
 - A runtime that is not installed has no folder. Its store is skipped and `adapter_notes` says so; that is not an error.
 - `--since` defaults to 90 days for word searches. Use `--since all` for older work. An id search ignores the window.
 - A Codex thread that the Codex app owns resumes with `codex exec fork`, not `codex exec resume`.

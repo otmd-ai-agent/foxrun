@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""runtime-session-search — find any past session across Claude, Codex, and
-Hermes, read its final reply, and return the native id so `orchestrate` can
+"""runtime-session-search — find any past session across Claude, Codex, Hermes, and
+OpenCode, read its final reply, and return the native id so `orchestrate` can
 resume it.
 
-Native files are truth:
+Native session records are truth:
   Claude  ~/.claude/projects/<cwd-slug>/<uuid>.jsonl
   Codex   ~/.codex/sessions/YYYY/MM/DD/rollout-<stamp>-<uuid>.jsonl
   Hermes  ~/.hermes/state.db and ~/.hermes/profiles/<name>/state.db (SQLite, read-only)
+  OpenCode  the configured server HTTP API (read-only)
 
 memex is an optional speed layer, used only when its exact capability check
 passes AND its index is fresh. It never replaces the native stores.
@@ -36,7 +37,7 @@ DEFAULT_MEMEX_INDEX = Path("~/.memex/index")
 MEMEX_FRESHNESS_SECONDS = 24 * 3600
 DEFAULT_SINCE = "90d"
 DEFAULT_LIMIT = 15
-RUNTIMES = ("claude", "codex", "hermes")
+RUNTIMES = ("claude", "codex", "hermes", "opencode")
 
 
 class SearchError(RuntimeError):
@@ -60,6 +61,9 @@ def load_stores(path: Path | None = None):
 def resume_command(runtime: str, session_id: str, profile: str | None = None) -> str:
     if runtime == "claude":
         return f"claude --resume {shlex.quote(session_id)}"
+    if runtime == "opencode":
+        base = os.environ.get("FOXRUN_OPENCODE_URL", "http://127.0.0.1:8081")
+        return shlex.join(["opencode", "attach", base, "--session", session_id])
     if runtime == "codex":
         return f"codex exec resume {shlex.quote(session_id)}   # Desktop-owned thread: codex exec fork"
     if profile and profile != "default":
@@ -195,6 +199,12 @@ def find(
             if note:
                 notes.append(f"hermes[{profile}]: {note}")
 
+    if use["opencode"] and (runtime == "opencode" or os.environ.get("FOXRUN_OPENCODE_URL")):
+        native_hits, native_notes = stores.opencode_hits(query, room_map, home,
+            since_epoch=0.0 if id_query else since_epoch, limit=limit)
+        hits.extend(native_hits)
+        notes.extend(native_notes)
+
     deduped: dict[tuple[str, str], dict[str, object]] = {}
     for hit in hits:
         key = (str(hit.get("store")), str(hit.get("session_id")))
@@ -223,7 +233,7 @@ def find(
         "backend": backend,
         "hits": ranked,
         "adapter_notes": notes,
-        "truth": "native files; memex is a speed layer only",
+        "truth": "native files and OpenCode API; memex is a speed layer only",
     }
 
 
@@ -259,6 +269,12 @@ def read(
                 continue
             if messages[0] or messages[1]:
                 candidates.append(("hermes", name, messages, str(database)))
+    opencode_cwd = None
+    if runtime == "opencode" or (runtime is None and session_id.startswith("ses_") and os.environ.get("FOXRUN_OPENCODE_URL")):
+        native = stores.opencode_session_read(session_id)
+        if native:
+            messages, source, opencode_cwd = native
+            candidates.append(("opencode", None, messages, source))
     if not candidates:
         return {"status": "not_found", "session_id": session_id, "runtime": runtime, "profile": profile,
                 "hint": "exact native id required; use `find` first"}
@@ -273,6 +289,9 @@ def read(
                 "hint": "the session has no saved assistant reply"}
     text = stores._format_transcript(last_user, final_reply)
     limited = stores._limit_read_text(text, max_lines=max_lines, max_bytes=max_bytes)
+    resume = resume_command(found_runtime, session_id, found_profile)
+    if found_runtime == "opencode" and opencode_cwd:
+        resume += " --dir " + shlex.quote(opencode_cwd)
     return {
         "status": "read",
         "runtime": found_runtime,
@@ -282,7 +301,7 @@ def read(
         "evidence": "latest_saved_messages",
         "task_success": "not_inferred",
         "private_reasoning": "excluded",
-        "resume_with": resume_command(found_runtime, session_id, found_profile),
+        "resume_with": resume,
         **limited,
     }
 

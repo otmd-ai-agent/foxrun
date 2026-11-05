@@ -7,6 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,10 @@ import shlex
 import subprocess
 import sys
 import uuid
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from base import paths, simple_yaml
 
@@ -174,7 +179,7 @@ def ancestry_launch(runtime, runner=subprocess.run, pid=None):
 
 
 def binding(runtime, session, workspace=None, cwd=None, launch=None):
-    valid(runtime, re.compile(r'(claude|codex)\Z'), 'runtime')
+    valid(runtime, re.compile(r'(claude|codex|opencode)\Z'), 'runtime')
     valid(session, ID, 'native session id')
     key = 'sessions/' + runtime + '/' + session + '.json'
     with locked():
@@ -226,6 +231,79 @@ def start(workspace=None, runtime=None, session=None, hook=None):
     return text
 
 
+def opencode_api(workspace, path, body):
+    """Use the running OpenCode server without reading its private session store."""
+    base = os.environ.get('FOXRUN_OPENCODE_URL', 'http://127.0.0.1:8081').rstrip('/')
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+        raise ValueError('FOXRUN_OPENCODE_URL must be an HTTP server URL without credentials or a query')
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+    password = os.environ.get('OPENCODE_SERVER_PASSWORD')
+    if password:
+        credentials = os.environ.get('OPENCODE_SERVER_USERNAME', 'opencode') + ':' + password
+        headers['Authorization'] = 'Basic ' + base64.b64encode(credentials.encode()).decode()
+    url = base + path + '?' + urllib.parse.urlencode({'directory': str(workspace)})
+    request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as error:
+        raise ValueError('OpenCode returned HTTP ' + str(error.code) + ' for ' + path) from error
+    except urllib.error.URLError as error:
+        raise ValueError('Cannot reach the configured OpenCode server; start it before launching a standing seat') from error
+
+
+def opencode_standing(record, prompt):
+    """Bind a created OpenCode session before its first prompt can run."""
+    from base.agent_catalog import resolve_model
+    _, seat_text = identity(record['seat'], 'opencode')
+    seat_data = simple_yaml.safe_load(seat_text[4:].split('\n---\n', 1)[0])
+    selected_model = resolve_model(seat_data.get('tier', 'work'), 'opencode', paths.system_home())
+    provider, model = selected_model.split('/', 1)
+    workspace = safe(paths.portfolio(), record['workspace'])
+    namefile = store('names/opencode/' + record['name'] + '.json')
+    launchfile = store('launches/' + record['launch'] + '/record.json')
+    record['route'] = {'mode': 'opencode-server', 'to': 'opencode'}
+    with locked():
+        if namefile.exists():
+            raise ValueError('standing name exists; inspect its trail and resume the native id')
+        write(namefile, {'launch': record['launch']})
+        write(launchfile, record)
+        event(record, 'spawn-request')
+    try:
+        result = opencode_api(workspace, '/session', {'title': record['name']})
+        session = valid(result.get('id') if isinstance(result, dict) else None, ID, 'returned native session id')
+        # Unlike a terminal child, the API gives us the native id before inference begins.
+        bound = binding('opencode', session, record['workspace'], str(workspace), record['launch'])
+        body = {'parts': [{'type': 'text', 'text': prompt}]}
+        body['model'] = {'providerID': provider, 'modelID': model}
+        opencode_api(workspace, '/session/' + urllib.parse.quote(session, safe='') + '/prompt_async', body)
+        trail = store('launches/' + record['launch'] + '/trail.jsonl')
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if any(json.loads(line).get('event') == 'start' for line in trail.read_text().splitlines()):
+                with locked():
+                    bound.update(state='spawned')
+                    write(store('sessions/opencode/' + session + '.json'), bound)
+                    write(launchfile, bound)
+                    event(bound, 'spawned', boot='queued')
+                print(json.dumps(dict(status='spawned', boot='queued', seat=record['seat'],
+                                      workspace=record['workspace'], name=record['name'],
+                                      native_session_id=session, trail=str(trail))))
+                return 0
+            time.sleep(0.1)
+        raise ValueError('OpenCode session ' + session + ' was created, but its hook did not deliver seat context. '
+                         'Inspect that session and the saved trail before retrying.')
+    except Exception as error:
+        with locked():
+            failed = read(launchfile)
+            failed['state'] = 'failed'
+            write(launchfile, failed)
+            event(failed, 'failed', reason=str(error))
+        raise
+
+
 def standing(args, runner=subprocess.run):
     valid(args.name, NAME, 'session name')
     valid(args.seat, NAME, 'seat')
@@ -244,6 +322,8 @@ def standing(args, runner=subprocess.run):
               'Use the standing seat context from the native start hook.\n'
               'If the hook provides no Seat and Identity, stop and report a failed seat start.\n'
               'Read that identity and its Boot reads before work. Await the next task.')
+    if args.runtime == 'opencode':
+        return opencode_standing(record, prompt)
     resolver = Path.home() / '.agents/skills/orchestrate/bin/orchestrate'
     resolved = runner([str(resolver), 'resolve', '--from', args.caller, '--to', args.runtime,
                        '--want', 'converse', '--hosted', '--cwd', str(workspace),

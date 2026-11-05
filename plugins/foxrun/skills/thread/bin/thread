@@ -4,13 +4,14 @@
 Commands:
   list                         every agent, workspace agent, and workspace lead, and which has a thread
   plan <seat> | lead <ws>      the title, folder, boot prompt, model, and route; writes nothing
-  make <seat> | lead <ws>      make the thread (codex, claude-cli); claude-desktop returns the plan
+  make <seat> | lead <ws>      make the thread (codex, claude-cli, opencode); claude-desktop returns the plan
   record <seat> | lead <ws>    save a thread that an app tool made (claude-desktop)
 
 JSON goes to stdout. Notes go to stderr. make and record take --dry-run.
 """
 
 import argparse
+import base64
 from datetime import datetime
 import json
 import os
@@ -24,9 +25,12 @@ import sys
 import threading
 import time
 import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
-RUNTIMES = ("claude-desktop", "claude-cli", "codex")
+RUNTIMES = ("claude-desktop", "claude-cli", "codex", "opencode")
 TIERS = ("judgment", "work", "cheap", "code")
 NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 LEAD = "lead"
@@ -195,16 +199,38 @@ def models(system):
     return data
 
 
+def validate_opencode_model(value, banned=()):
+    """Validate a provider-qualified model against qualified and bare bans."""
+    if (not isinstance(value, str) or
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*/[^\s\x00-\x1f\x7f]+', value)):
+        raise ThreadError('OpenCode model must use provider/model without whitespace or control characters')
+    model = value.split('/', 1)[1]
+    if model.startswith('/') or model.endswith('/') or '//' in model:
+        raise ThreadError('OpenCode model must use provider/model with non-empty path segments')
+    if value in banned or model in banned:
+        raise ThreadError('OpenCode model is banned by config/models.yaml: ' + value)
+    return value
+
+
 def pick_model(system, runtime, tier, model):
     data = models(system)
-    family = "codex" if runtime == "codex" else "claude"
+    family = runtime if runtime in ("codex", "opencode") else "claude"
+    if runtime == "opencode" and not model and os.environ.get("FOXRUN_OPENCODE_MODEL"):
+        configured = os.environ["FOXRUN_OPENCODE_MODEL"]
+        return validate_opencode_model(configured, data.get("banned", [])), None
     if model:
         if model not in data.get("allowed", []):
             raise ThreadError("model is not in the allowed list of config/models.yaml: " + model)
+        if runtime == "opencode":
+            validate_opencode_model(model, data.get("banned", []))
         return model, None
     entry = (data["tiers"].get(tier) or {}).get(family)
     if not entry or not entry.get("model"):
         raise ThreadError("config/models.yaml has no " + family + " model for tier " + tier)
+    if runtime == "opencode":
+        validate_opencode_model(entry["model"], data.get("banned", []))
+        if entry["model"] not in data.get("allowed", []):
+            raise ThreadError("model is not in the allowed list of config/models.yaml: " + entry["model"])
     return entry["model"], tier
 
 
@@ -245,7 +271,7 @@ def target(system, words, workspace):
 
 def plan(system, words, runtime, workspace=None, tier=None, model=None, chosen=None):
     seat = target(system, words, workspace)
-    family = "codex" if runtime == "codex" else "claude"
+    family = runtime if runtime in ("codex", "opencode") else "claude"
     if family not in seat["runtimes"]:
         raise ThreadError(seat["seat"] + " does not run on " + family)
     settings = config(system)
@@ -278,6 +304,9 @@ def plan(system, words, runtime, workspace=None, tier=None, model=None, chosen=N
         result["command"] = shlex.join(["claude", "--bg", "-n", result["title"], "--model", chosen, prompt])
     elif runtime == "codex":
         result["command"] = "codex app-server: thread/start, thread/name/set, turn/start"
+    elif runtime == "opencode":
+        result["command"] = "OpenCode server: POST /session, POST /session/:id/prompt_async"
+        result["next"] = "Open this workspace in OpenCode and select the session by its title. The boot turn runs asynchronously."
     else:
         result["next"] = ("Call the Claude app's new-session tool with title, cwd, and prompt. "
                           "Then run: thread record ... --runtime claude-desktop --id <session id>")
@@ -438,6 +467,54 @@ def claude_make(planned):
     return match.group(0) if match else planned["title"]
 
 
+def opencode_request(planned, method, path, body=None, timeout=30):
+    """Call the configured OpenCode server in the thread's workspace."""
+    base = os.environ.get("FOXRUN_OPENCODE_URL", "http://127.0.0.1:8081").rstrip("/")
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.query or parsed.fragment or parsed.username:
+        raise ThreadError("FOXRUN_OPENCODE_URL must be an HTTP server URL without credentials or a query")
+    url = base + path + "?" + urllib.parse.urlencode({"directory": planned["cwd"]})
+    headers = {"Accept": "application/json"}
+    password = os.environ.get("OPENCODE_SERVER_PASSWORD")
+    if password:
+        user = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
+        headers["Authorization"] = "Basic " + base64.b64encode((user + ":" + password).encode()).decode()
+    data = None if body is None else json.dumps(body).encode()
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as error:
+        raise ThreadError("OpenCode returned HTTP " + str(error.code) + " for " + path) from error
+    except urllib.error.URLError as error:
+        raise ThreadError("Cannot reach OpenCode at " + base + ". Start its web server and retry.") from error
+
+
+def opencode_make(system, planned, timeout):
+    """Create and record a real session, then queue its boot turn without waiting for inference."""
+    provider, separator, model = planned["model"].partition("/")
+    if not separator or not provider or not model:
+        raise ThreadError("OpenCode models must use provider/model")
+    created = opencode_request(planned, "POST", "/session", {"title": planned["title"]}, timeout)
+    ident = created.get("id") if isinstance(created, dict) else None
+    if not isinstance(ident, str) or not ident.startswith("ses_"):
+        raise ThreadError("OpenCode did not return a session id")
+    # Preserve the created session if inference fails to queue; a retry must not conceal it.
+    save(system, planned, ident, False)
+    try:
+        opencode_request(planned, "POST", "/session/" + urllib.parse.quote(ident, safe="") + "/prompt_async",
+                         {"model": {"providerID": provider, "modelID": model},
+                          "parts": [{"type": "text", "text": planned["prompt"]}]}, timeout)
+    except (ThreadError, OSError, ValueError) as error:
+        raise ThreadError("OpenCode session " + ident + " was created and recorded, but its boot turn did not queue. "
+                          "Open that session and send the planned prompt; do not create another thread. " + str(error)) from error
+    planned["boot"] = "queued"
+    return ident
+
+
 def parser():
     top = argparse.ArgumentParser(prog="thread", description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -474,7 +551,7 @@ def main(argv=None):
             return 0
         if args.command == "record":
             if args.runtime != "claude-desktop":
-                note("record is for a thread an app tool made; make records codex and claude-cli itself")
+                note("record is for a thread an app tool made; make records codex, claude-cli, and opencode itself")
             planned["recorded"] = save(system, planned, args.id, args.dry_run)
             planned["dry_run"] = args.dry_run
             print(json.dumps(planned, indent=2, ensure_ascii=False))
@@ -484,7 +561,10 @@ def main(argv=None):
             planned["made"] = False
             print(json.dumps(planned, indent=2, ensure_ascii=False))
             return 0
-        ident = codex_make(planned, args.timeout) if args.runtime == "codex" else claude_make(planned)
+        if args.runtime == "opencode":
+            ident = opencode_make(system, planned, args.timeout)
+        else:
+            ident = codex_make(planned, args.timeout) if args.runtime == "codex" else claude_make(planned)
         planned["made"] = True
         planned["recorded"] = save(system, planned, ident, False)
         print(json.dumps(planned, indent=2, ensure_ascii=False))

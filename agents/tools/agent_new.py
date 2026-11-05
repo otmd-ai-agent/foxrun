@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 
 MARKER = "managed-by: agent-new v1"
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
-RUNTIMES = {"hermes", "claude", "codex"}
+RUNTIMES = {"hermes", "claude", "codex", "opencode"}
 HERMES_MODES = {"profile", "child", "kanban", "none"}
 REQUIRED = {
     "id", "display_name", "role", "summary", "tier", "shared", "runtimes",
@@ -214,7 +214,7 @@ def validate_identity(identity: Identity, repo: Path) -> None:
         raise AgentNewError(f"Invalid tier: {data['tier']}")
     runtimes = data["runtimes"]
     if not isinstance(runtimes, list) or not set(runtimes).issubset(RUNTIMES):
-        raise AgentNewError("Runtimes must contain Claude and Codex on day one.")
+        raise AgentNewError("Runtimes must name supported agent hosts.")
     mode = data["hermes_mode"]
     if mode not in HERMES_MODES:
         raise AgentNewError(f"Invalid hermes_mode: {mode}")
@@ -393,6 +393,17 @@ def codex_cape(identity: Identity, repo: Path) -> str:
     lines = [f"# {MARKER}"]
     lines += [f"{key} = {json.dumps(value, ensure_ascii=False)}" for key, value in values.items()]
     return "\n".join(lines) + "\n"
+def opencode_cape(identity: Identity, repo: Path) -> str:
+    """Render an OpenCode agent that reads the same canonical seat and contracts."""
+    data = identity.data
+    tier = policy(repo)["tiers"][data["tier"]].get("opencode") or {}
+    front = {"description": data["summary"], "mode": "all"}
+    model = tier.get("model")
+    if model:
+        front["model"] = model
+    lines = [f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in front.items()]
+    return "---\n" + "\n".join(lines) + "\n---\n" + cape_body(identity, repo)
+
 def _identity_instructions(identity: Identity) -> str:
     """Return the identity body with the shared base appended for the v2 shape."""
     instructions = identity.body
@@ -541,12 +552,15 @@ def render_identity(identity: Identity, *, dry_run: bool = False, journal: Journ
     workspace = identity.path.parent.parent if identity.path.parent.name == "team" else None
     claude_dir = workspace / "team/claude" if workspace else r["system"] / "runs/generated/agents/claude"
     codex_dir = workspace / "team/codex" if workspace else r["system"] / "runs/generated/agents/codex"
+    opencode_dir = workspace / "team/opencode" if workspace else r["system"] / "runs/generated/agents/opencode"
     _ruled_codex_alias(identity, codex_dir / (data["id"] + ".toml"))
     targets: list[tuple[Path, str]] = []
     if "claude" in data["runtimes"]:
         targets.append(((claude_dir / f"{data['id']}.md" if workspace else claude_dir / f"{data['id']}.md"), claude_cape(identity, repo)))
     if "codex" in data["runtimes"]:
         targets.append((codex_dir / f"{data['id']}.toml", codex_cape(identity, repo)))
+    if "opencode" in data["runtimes"]:
+        targets.append((opencode_dir / f"{data['id']}.md", opencode_cape(identity, repo)))
     for path, _ in targets:
         safe_new_path(path)
         if path.resolve() == identity.path.resolve():
@@ -690,7 +704,7 @@ def create_command(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "id": args.id, "display_name": args.id.replace("-", " ").title(),
         "role": args.role, "summary": args.summary, "tier": args.tier,
         "shared": args.shared, "client_default": None if args.client == "system" else args.client,
-        "runtimes": sorted(set(csv_list(args.runtimes)) | {"claude", "codex"}), "hermes_mode": mode,
+        "runtimes": sorted(set(csv_list(args.runtimes)) | (set() if "opencode" in csv_list(args.runtimes) else {"claude", "codex"})), "hermes_mode": mode,
         "hermes_profile": args.id if mode in {"profile", "kanban"} else None,
         "sets": csv_list(args.sets),
         "return_default": args.return_to or "session:caller", "owns": [], "version": 1,
@@ -839,6 +853,15 @@ def probe_one(runtime: str, identity: Identity, timeout: int, runner: Callable[.
         model = policy(r["repo"])["tiers"][data["tier"]]["codex"]["model"]
         full_prompt = cape_body(identity, r["repo"]).rstrip() + "\n\n" + prompt
         cmd = ["codex", "exec", "-s", "read-only", "-C", str(r["vault"]), "--skip-git-repo-check", "-m", model, "--json", "-o", str(tmp_path), full_prompt]
+        cwd = r["vault"]
+    elif runtime == "opencode":
+        full_prompt = cape_body(identity, r["repo"]).rstrip() + "\n\n" + prompt
+        cmd = ["opencode", "run", "--format", "json", full_prompt]
+        model = (policy(r["repo"])["tiers"][data["tier"]].get("opencode") or {}).get("model")
+        if not model:
+            raise AgentNewError("No OpenCode model is configured for tier " + data["tier"])
+        if model:
+            cmd[2:2] = ["--model", model]
         cwd = r["vault"]
     else:
         if runner is default_runner and not hermes_available():

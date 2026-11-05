@@ -441,6 +441,19 @@ class ModelPolicyDoctorTests(unittest.TestCase):
                 (root / 'config/models.yaml').write_text(json.dumps(changed))
                 with self.subTest(mutation=mutation), self.assertRaises(ValueError): model_policy(root)
 
+    def test_explicit_opencode_model_is_allowed_and_used_by_every_tier(self):
+        from base.agent_catalog import model_policy
+        original = (ROOT / 'config/models.yaml').read_bytes()
+        with patch.dict(os.environ, {'FOXRUN_OPENCODE_MODEL': 'dmr/local-model'}):
+            policy = model_policy(ROOT)
+            self.assertIn('dmr/local-model', policy['allowed'])
+            for runtimes in policy['tiers'].values():
+                self.assertEqual(runtimes['opencode']['model'], 'dmr/local-model')
+        self.assertEqual((ROOT / 'config/models.yaml').read_bytes(), original)
+        with patch.dict(os.environ, {'FOXRUN_OPENCODE_MODEL': 'missing-provider'}):
+            with self.assertRaises(ValueError):
+                model_policy(ROOT)
+
     def test_literal_check_covers_code_config_squads_workflows_skills_and_held_seats(self):
         from base.agent_catalog import model_policy, model_id_hits, check_models
         policy = model_policy(ROOT)

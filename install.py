@@ -20,7 +20,7 @@ import time
 
 # The hook merge ships in the home, so `foxrun.py hookup` can rerun it on an existing install.
 from base.hookup import (codex_event_key, codex_hook_hash, codex_trust, connect,  # noqa: F401
-                         hermes_entries, hermes_hookup, hook_entries)
+                         hermes_entries, hermes_hookup, hook_entries, runtime_settings, settings_name)
 
 # Frozen made-at-install rows from the product target; table rows describe SQLite objects.
 MADE_TSV = """home\tpath\tkind
@@ -684,21 +684,22 @@ def install_product_skill(home, skill, name, runtime_roots=()):
     return True
 
 
-def first_agent(home, portfolio, workspace, env):
+def first_agent(home, portfolio, workspace, env, runtime='both'):
     ident = ('lead-' + workspace)[:40]
     code = '''import argparse,json,os,re,sys
 from pathlib import Path
 sys.path.insert(0,str(Path('agents/tools').resolve()))
 import agent_new as tool
 repo=Path('agents').resolve()
-workspace=Path(sys.argv[1]); ident=sys.argv[2]
+workspace=Path(sys.argv[1]); ident=sys.argv[2]; opencode=sys.argv[3]=='opencode'
 args=argparse.Namespace(id=ident,role='workspace lead',summary='Lead '+workspace.name+' and keep work clear.',
- tier='work',shared=False,client=workspace.name,runtimes='claude,codex',hermes_mode='none',skills='log,to-tickets',
+ tier='work',shared=False,client=workspace.name,runtimes='opencode' if opencode else 'claude,codex',hermes_mode='none',skills='log,to-tickets',
  tools='',sets='base',return_to='session:caller',dry_run=False)
 tool.create_command(args)
 identity=tool.load_identity(ident,repo)
 # Use the tool's fresh template, without importing a seat's roster or runtime bindings.
-for runtime,extension,render in [('claude','md',tool.claude_cape),('codex','toml',tool.codex_cape)]:
+renderers=[('opencode','md',tool.opencode_cape)] if opencode else [('claude','md',tool.claude_cape),('codex','toml',tool.codex_cape)]
+for runtime,extension,render in renderers:
  text=render(identity,repo)
  # Paths in Markdown are relative to the workspace. The runtime chooses its model.
  text=text.replace(str(repo),os.path.relpath(repo,workspace))
@@ -707,17 +708,23 @@ for runtime,extension,render in [('claude','md',tool.claude_cape),('codex','toml
   folder.mkdir(parents=True,exist_ok=True)
   with (folder/(ident+'.'+extension)).open('w',encoding='utf-8',newline='\\n') as stream:
    stream.write(text)
-source=identity.path
+identity_text=identity.path.read_text(encoding="utf-8")
 for target in (repo/'generated'/(ident+'.md'),workspace/'team'/(ident+'.md')):
  with target.open('w',encoding='utf-8',newline='\\n') as stream:
-  stream.write(source.read_text(encoding="utf-8"))
+  stream.write(identity_text)
 # System seats use the same resolver as starts and every other seat reader.
 names={p.stem for folder in (repo,repo.parent/'profile/agents') for p in folder.glob('*.md')}
 for name in sorted(names):
  file=tool.system_paths.resolve_seat(name,home=repo.parent,shipped_dir=repo)
  if file is None or not tool.is_identity_page(file): continue
+ if opencode:
+  data,body=tool.split_identity(file.read_text(encoding='utf-8'))
+  data['runtimes']=sorted(set(data['runtimes'])|{'opencode'})
+  personal=repo.parent/'profile/agents'/(name+'.md')
+  personal.parent.mkdir(parents=True,exist_ok=True)
+  personal.write_text('---\\n'+json.dumps(data,indent=2)+'\\n---\\n'+body,encoding='utf-8')
  seat=tool.load_identity(file.stem,repo)
- for runtime,extension,render in [('claude','md',tool.claude_cape),('codex','toml',tool.codex_cape)]:
+ for runtime,extension,render in renderers:
   if runtime not in seat.data['runtimes']: continue
   text=render(seat,repo)
   text=re.sub(r'^model *[:=].*\\n','',text,flags=re.M)
@@ -726,9 +733,9 @@ for name in sorted(names):
   with target.open('w',encoding='utf-8',newline='\\n') as stream:
    stream.write(text)
 '''
-    run(code, home, env, [portfolio / workspace, ident])
+    run(code, home, env, [portfolio / workspace, ident, runtime])
     write_text(portfolio / workspace / 'team/TEAM.md', '# Team\n\nLead: [' + ident + '](' + ident + '.md).\n'
-        'Claude and Codex files are in team/claude and team/codex.\n'
+        + ('OpenCode files are in team/opencode.\n' if runtime == 'opencode' else 'Claude and Codex files are in team/claude and team/codex.\n') +
         'Source: agent_new.py’s fresh template. It starts without an existing team or external accounts.\n')
     return ident
 
@@ -797,6 +804,7 @@ If the soul is missing, say so in your first reply, then keep working.
 If the global contract is missing, stop and tell @Person@. Do no work until it is back.
 ''',
 }
+RUNTIME_CONTRACTS['opencode'] = RUNTIME_CONTRACTS['codex']
 
 
 def runtime_contract(raw, runtime, home, name):
@@ -838,19 +846,22 @@ def runtime_paths(args, home, portfolio, tree):
             if args.runtime == 'both':
                 folder /= runtime
         else:
-            folder = Path.home() / ('.' + runtime)
+            folder = runtime_settings(runtime).parent
         folder = destination(str(folder), 'runtime home', tree, empty=False)
         if within(folder,home) or within(home,folder) or within(folder,portfolio) or within(portfolio,folder):
             raise ValueError('runtime home must not overlap either install folder')
         # Reject settings symlinks before any install writes.
-        settings = folder / ('settings.json' if runtime == 'claude' else 'hooks.json')
+        settings = folder / settings_name(runtime)
         if settings.is_symlink():
             raise ValueError('runtime settings must not be a symlink')
         if args.hookup and settings.exists():
             data = json.loads(settings.read_text(encoding="utf-8"))
-            if not isinstance(data,dict) or not isinstance(data.get('hooks',{}),dict):
+            if runtime == 'opencode':
+                if not isinstance(data, dict) or not isinstance(data.get('plugin', []), list):
+                    raise ValueError('OpenCode settings must contain a JSON object with a plugin list')
+            elif not isinstance(data,dict) or not isinstance(data.get('hooks',{}),dict):
                 raise ValueError('runtime settings must contain a JSON object with hooks')
-            if any(not isinstance(value,list) for value in data.get('hooks',{}).values()):
+            if runtime != 'opencode' and any(not isinstance(value,list) for value in data.get('hooks',{}).values()):
                 raise ValueError('runtime hook events must contain lists')
         paths[runtime] = settings
     return paths
@@ -892,7 +903,7 @@ def main(argv=None):
     parser.add_argument('--portfolio', required=not listing)
     parser.add_argument('--person', default='person')
     parser.add_argument('--workspace', default='my-workspace')
-    parser.add_argument('--runtime', choices=('claude','codex','both'), default='both')
+    parser.add_argument('--runtime', choices=('claude','codex','opencode','both'), default='both')
     parser.add_argument('--runtime-home')
     parser.add_argument('--hookup', action='store_true')
     parser.add_argument('--yes', action='store_true')
@@ -913,7 +924,7 @@ def main(argv=None):
         if not args.yes:
             args.person = ask('Your name', args.person, 'This name identifies your work. Use one name without spaces.', PERSON.fullmatch)
             args.workspace = ask('First workspace', args.workspace, 'This folder holds your first project. Use lowercase letters, digits, and dashes.', WORKSPACE.fullmatch)
-            args.runtime = ask('Runtime', args.runtime, 'Choose the app that reads your work: claude, codex, or both.', lambda value: value in ('claude','codex','both'))
+            args.runtime = ask('Runtime', args.runtime, 'Choose the app that reads your work: claude, codex, opencode, or both (Claude and Codex).', lambda value: value in ('claude','codex','opencode','both'))
         if not PERSON.fullmatch(args.person):
             raise ValueError('person must be one name without spaces')
         if not WORKSPACE.fullmatch(args.workspace) or args.workspace in ('atlas','inbox'):
@@ -941,7 +952,7 @@ def main(argv=None):
         build_database(home,packs,env)
         session_holder(home,env)
         run("import sys; from base.install_lint_defaults import generate; generate(*sys.argv[1:])", home,env,[home,portfolio,args.workspace])
-        ident = first_agent(home,portfolio,args.workspace,env)
+        ident = first_agent(home,portfolio,args.workspace,env,args.runtime)
         skill_roots = [path.parent / 'skills' for path in paths.values()]
         # A trial install keeps its shared shelf under the trial folder, never the real home.
         shared = Path(args.runtime_home).expanduser() / 'agents' if args.runtime_home else Path.home() / '.agents'
@@ -967,6 +978,18 @@ def main(argv=None):
         for skill in product_skills(home):
             install_product_skill(home,skill,args.person,skill_roots)
         install_seat_boots(home,args.person,skill_roots)
+        if 'opencode' in paths:
+            agents_root = paths['opencode'].parent / 'agents'
+            if agents_root.is_symlink():
+                raise ValueError('OpenCode agent folder must not be a symlink')
+            agents_root.mkdir(parents=True, exist_ok=True)
+            for source in sorted((home / 'agents/generated/opencode').glob('*.md')):
+                target = agents_root / source.name
+                if target.exists() or target.is_symlink():
+                    print('Kept existing OpenCode agent: ' + str(target))
+                    continue
+                with target.open('xb') as stream:
+                    stream.write(source.read_bytes())
         write_manifests(home,portfolio,args.workspace)
         install_runtime_contracts(paths,home,args.person)
         if args.hookup:
@@ -984,10 +1007,13 @@ def main(argv=None):
                     print('Codex trust rows written: ' + str(path.parent / 'config.toml'))
         else:
             for runtime in ('claude','codex') if args.runtime=='both' else (args.runtime,):
-                folder = Path(args.runtime_home).expanduser() if args.runtime_home else Path.home()/('.'+runtime)
+                folder = Path(args.runtime_home).expanduser() if args.runtime_home else runtime_settings(runtime).parent
                 if args.runtime_home and args.runtime=='both':
                     folder /= runtime
-                path = folder/('settings.json' if runtime=='claude' else 'hooks.json')
+                path = folder / settings_name(runtime)
+                if runtime == 'opencode':
+                    print('Connect OpenCode hooks: ' + shlex.join(['python3', str(home / 'foxrun.py'), 'hookup', '--runtime', runtime, '--runtime-home', str(folder)]))
+                    continue
                 print('Add these exact entries to ' + str(path) + ' (merge with existing hooks):')
                 print(json.dumps({'hooks':hook_entries(home,runtime)},indent=2))
         if args.no_schedule:

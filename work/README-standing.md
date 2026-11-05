@@ -65,3 +65,22 @@ Close only after Person's numbered choice and required confirmation.
 Offline checks prove the process-argument contract with fake native and process adapters.
 The sandbox denies actual `/bin/ps`; real process ancestry remains part of activation proof.
 Real native registration, context delivery, resume, and compaction wait for the move.
+
+## OpenCode
+
+With the OpenCode web server already running, use its native session API:
+
+```sh
+python3 "$FOXRUN_HOME/foxrun.py" standing --seat architect --runtime opencode --caller opencode --name architect-local --workspace <workspace> --conversation opencode:<current-session-id>
+```
+
+`FOXRUN_OPENCODE_URL` selects the server and defaults to `http://127.0.0.1:8081`.
+The launcher uses `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD` when set.
+`FOXRUN_OPENCODE_MODEL` selects a configured `provider/model`; otherwise OpenCode uses its default model.
+The launcher creates a real session, binds its returned id to the seat, and queues the boot prompt.
+It reports `spawned` only after the native Foxrun hook has delivered the seat context.
+`boot: queued` means the model turn may still be running; it does not prove the work finished.
+Resume the session from the workspace's OpenCode session list. Herdr is not involved in this route.
+
+If the hook fails, the launcher keeps the created session, reserved name, and trail for inspection.
+Do not create a replacement session to hide a failed launch.

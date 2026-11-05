@@ -1,0 +1,106 @@
+# Foxrun in Codespaces with OpenCode
+
+This setup runs the OpenCode browser application on private port **8081**, with a local Gemma model served by Docker Model Runner. OpenCode uses Foxrun's installer, onboarding skills, agent seats, work commands, and memory integration.
+
+**Validation status:** installation and memory setup pass with local Gemma, but the full agent workflow is not ready. The standard work agent ran its start command, then described running setup status without making that tool call. Keep this branch in draft until a real task and cross-session recall pass.
+
+This is intended for a disposable session of about an hour. The configuration skips nightly scheduling and backup prompts. Delete the Codespace and its storage when you finish.
+
+## Start
+
+1. Create a Codespace from the branch containing this configuration. Use a Linux x86-64 machine with at least 4 CPUs, 16 GB RAM, and 32 GB storage.
+2. Wait for the container image, then follow startup in `/workspaces/foxrun-state/startup.log`. On a cold start, Docker Model Runner pulls the pinned **4.09 GB Gemma 4 E2B** artifact directly into its model volume. Startup configures CPU inference and requires an exact `READY` answer before opening OpenCode. Later starts reuse the cached model.
+3. The editor is configured to detect port **8081** and open it in a separate browser tab. If the tab does not open, choose **Ports → 8081 → Open in Browser**. Keep the port private and its protocol HTTP; GitHub supplies the browser's HTTPS address.
+4. Sign in to OpenCode with username `opencode`. Show your generated password in the Codespaces terminal:
+
+   ```sh
+   python3 codespaces/start.py --password
+   ```
+
+5. Open the `/workspaces/foxrun-state/launch` project in OpenCode and run `/foxrun-setup`. The dedicated setup agent asks for your name and first workspace, then uses structured tools for the actual Foxrun setup steps. It installs from this checkout with `--runtime opencode`.
+6. Continue in the workspace you created under `/workspaces/foxrun-state/portfolio/`. Foxrun's agent threads and skills operate on the installed files and task database there.
+
+OpenCode runs commands and edits files with the Codespace user's permissions. Its normal approval controls remain available. Both its main and small-model settings use the local Docker Model Runner provider; hosted providers are not enabled by this configuration.
+
+## Storage and configuration
+
+The configuration requests four CPUs, 16 GB RAM, and 32 GB storage, matching the available Codespaces machine. Model Runner stores the roughly 4.09 GB model in its own volume. There is no separate GGUF in the application image and no packaging/import copy. Container images, tools, and user files still need disk space; available capacity alone does not guarantee that a download will fit. Pull failures are recorded in `startup.log`.
+
+The container account's home is `/workspaces/foxrun-state/user`. Startup creates checked `~/.foxrun` and `~/foxrun` aliases to the installed system and portfolio, so existing product skills that use those default paths reach the same records. Startup refuses conflicting paths and never changes the caller's home environment. A rebuild is required to adopt this account-home setting.
+
+The `foxrun-state` Docker volume holds the installed system, portfolio, OpenCode sessions, transcripts, configuration, and generated browser password. The separate `model-cache` volume holds Model Runner's model data. Restarting the app reuses these volumes; a new or empty model volume requires a download. Deleting the Codespace and its associated storage discards them; this setup creates no external backup.
+
+The startup script does not invent a person or workspace and does not install Foxrun before onboarding. It copies the three bootstrap skills into the launch project. The real installer creates the complete skill shelf after you supply your details. The setup agent sees seven tools: questions, status, installation, doctor, thread planning, thread creation, and memory setup. Installation, thread creation, and memory changes require OpenCode approval. The tools call the existing product commands; full command logs remain in `setup-logs/` and the model receives short results. The browser interface belongs to OpenCode.
+
+The model and pull/configuration/probe sequence come from the [working semantic-contracts workshop](https://github.com/onthemarkdata/semantic-contracts-workshop/blob/7cece7c44725a23da05349c64f198d9e810109b1/docs/model-runner.md). `gemma.lock.json` pins Docker's Gemma 4 E2B Q4_K_M artifact by manifest digest. This is Docker's distribution of an Unsloth conversion of Google's model. Model Runner verifies the registry artifact; the client resolves the exact digest again after a pull and rejects streamed pull errors.
+
+Foxrun retains a **32,768-token** context for OpenCode's tools, skills, and conversation, while the workshop's short checks use 4,096 tokens. Both use four CPU threads, one inference slot, Jinja templates, and disabled thinking. The workshop's successful text checks do not validate Foxrun's larger context or tool use. Memory use and full onboarding still need a live 16 GB Codespace check. CPU inference can be slow; review actual tool results.
+
+OpenCode is pinned to **1.19.5**. Its official Linux x64 archive is verified against SHA-256 `588310a336fa3b9df36b3f0225b26f679d453efaad0cf3d66c3651ef3ec1647a`. Docker Model Runner remains pinned by digest in the Compose file; startup uses its HTTP API and needs no packaging CLI.
+
+## Prebuilds and model caching
+
+A Codespaces prebuild can prepare the OpenCode application image and its tools. This configuration pulls the model directly into Model Runner's volume on the first start; it does not bake weights into the application image. Do not assume GitHub prebuilds preserve that named volume. A new Codespace may still need the 4.09 GB download; restarts with the existing model volume reuse it.
+
+An administrator can enable prebuilds in [the repository's Codespaces settings](https://github.com/otmd-ai-agent/foxrun/settings/codespaces), selecting `codex/codespaces-opencode` and `.devcontainer/devcontainer.json`. Wait for **Prebuild ready** before creating a Codespace. Prebuilds consume GitHub Actions time and storage. See [GitHub's configuration guide](https://docs.github.com/en/codespaces/prebuilding-your-codespaces/configuring-prebuilds).
+
+## Checks and troubleshooting
+
+If an older revision entered recovery mode with `Model setup needs at least 11.4 GB free`, both services may already have started: the model startup check failed afterward. Update this branch with `git pull --ff-only`. On [your Codespaces page](https://github.com/codespaces), check storage capacity and usage. If space is still low, remove only files you no longer need, or choose a larger machine through **… → Change machine type** if your account offers one. Then rebuild the container. The available machine types depend on the account and organization policy; this repository's agent account currently offers only 32 GB machines. Rebuilding alone does not increase capacity. See [GitHub's machine-type guide](https://docs.github.com/en/codespaces/customizing-your-codespace/changing-the-machine-type-for-your-codespace?tool=webui). A larger machine may have a higher billing rate.
+
+If the editor's creation-log command is unavailable, read the log in the recovery terminal:
+
+```sh
+tail -n 80 /workspaces/.codespaces/.persistedshare/creation.log
+```
+
+Run these commands from the source checkout:
+
+```sh
+python3 codespaces/start.py
+python3 -m unittest discover -s codespaces -p 'test_*.py' -v
+python3 codespaces/check_integration.py --opencode /usr/local/bin/opencode
+tail -n 60 /workspaces/foxrun-state/startup.log
+tail -n 60 /workspaces/foxrun-state/opencode.log
+```
+
+The container launches startup in the background. A model or app startup failure is written to `startup.log` and does not fail the container lifecycle command. After fixing the reported issue, run `python3 codespaces/start.py` to retry in the foreground.
+
+Startup checks OpenCode's authenticated health endpoint and refuses to replace an unrelated process on port 8081. Running startup again reuses the existing healthy server. The port check permits recently closed connections so an immediate restart is not mistaken for a conflicting listener.
+
+If the browser returns HTTP 502 while OpenCode is healthy, remove the existing port forwarding entry, add port 8081 again, select **Change Port Protocol → HTTP**, and use **Open in Browser**. That recovered the previous demo in a live Codespace. Automatic forwarding and browser launch for this OpenCode configuration still require a fresh Codespace test.
+
+Local tests cover streamed pull failures, incomplete downloads, cached-model inference failures, incorrect probe answers, configuration preservation, checked home aliases, private credentials, background startup errors, repeat startup, and occupied ports. An HTTP fixture exercises cold and warm initialization with the exact model digest and configured context. These fixtures do not download or run Gemma.
+
+The reproducible integration check runs the real installer and pinned OpenCode host against a deterministic local model fixture. It checks installed skills, lifecycle hooks, transcripts, handoffs, compaction, and commands through default-path aliases using a temporary home. It does not change the test runner's home. A local Docker Desktop run on 4 November 2026 built and started the actual devcontainer, installed Foxrun with zero doctor failures, discovered 63 skills, and executed a real Gemma/OpenCode bash tool call. The runner had four CPU threads in a Docker VM with about 15.6 GiB RAM; other containers were also running.
+
+| Local check | Observed result |
+| --- | --- |
+| Cold application image preparation | About 47 seconds |
+| Cold 4.09 GB model pull to configuration | About 337 seconds on this connection |
+| Initial model READY probe | 3.755 seconds |
+| Foxrun installer | 4.775 seconds; doctor reported zero failures |
+| First agent request, including a bash tool call | 166.57 seconds; about 22K prompt tokens |
+| OpenCode restarts with the model already loaded | 3.333 and 3.195 seconds |
+| Runner memory peak through these checks | About 5.4 GiB; no OOM events |
+| Authenticated health and browser HTML | Passed |
+
+The first restart exposed a false port-conflict check: no process was listening, but closed TCP connections prevented a plain bind. The startup probe now uses `SO_REUSEADDR`; regression coverage also verifies that an active unrelated listener is still rejected.
+
+These local timings are not Codespaces timings, and a single tool call does not establish full onboarding reliability. Fresh Codespaces creation and automatic browser opening remain validation gates.
+
+Docker Desktop hides this runner image from Compose listings, as documented in the workshop. The local test started the named runner explicitly and used a test-only Compose override to omit that dependency after checking its health. It used a source snapshot volume because the temporary checkout was outside Desktop's shared host paths. Dev Containers CLI 0.90.0 used a temporary directory inside the build context for compatibility with Compose 5.6.0's build-file access checks. These local overrides do not change the Codespaces configuration.
+
+References: [OpenCode web interface](https://opencode.ai/docs/web/), [Docker Model Runner integration](https://docs.docker.com/guides/opencode-model-runner/), and [the workshop model lock](https://github.com/onthemarkdata/semantic-contracts-workshop/blob/7cece7c44725a23da05349c64f198d9e810109b1/models/gemma.lock.json).
+
+## Onboarding experiment
+
+The focused setup agent reduced the first live request to about 1,680 input tokens, including cached input, compared with about 22K in the earlier general-agent test. Fresh local state volumes passed name/workspace collection, native installation approval, the real installer, and doctor with zero failures. The latest run needed follow-up prompts to continue into thread setup and asked one poorly worded seat question; onboarding is not yet reliable without guidance. The final fresh-container run also enabled memory and created recorded Chief of Staff and workspace lead sessions. Queuing a thread does not establish that its boot succeeded.
+
+Free-form setup commands failed on relative paths and an invented model tier. The structured tools fix the command arguments, preserve failure exit codes, and keep verbose installer output out of the prompt. Unicode remains literal in tool results so a model can reuse an emoji without copying escaped surrogate text.
+
+The standard Build agent processed 20,534 input tokens, successfully ran the Chief of Staff start command, then wrote that it was running setup status without making the required tool call. A smaller work-agent experiment also failed: it tried to read a command as a file and hit a permission denial. That experimental configuration is not shipped. The full product remains available through OpenCode's existing work agents and installed skills, but reliable local-model task execution and recall are still acceptance gates. Increasing the context alone did not resolve the observed mistakes.
+
+The live test also exposed an installer bug: copying the lead identity onto its own path truncated the workspace file. The installer now reads the identity before opening either destination. A fresh-install regression verifies that both identity copies match and that the actual thread command can plan the lead on OpenCode.
+
+Twenty startup/model/onboarding tests pass. The pinned OpenCode integration fixture checks the exact setup tool list and a prompt-size limit, then exercises installation, 63 skills, hooks, handoffs, and compaction. Its deterministic responses test integration, not model judgment.

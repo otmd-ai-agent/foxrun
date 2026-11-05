@@ -1,0 +1,38 @@
+{
+  "name": "Foxrun · OpenCode and local Gemma",
+  "dockerComposeFile": "compose.yaml",
+  "service": "foxrun",
+  "workspaceFolder": "/workspaces/foxrun",
+  "remoteUser": "vscode",
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "portsAttributes": {
+    "8081": {
+      "label": "Foxrun in OpenCode (private)",
+      "onAutoForward": "openBrowser",
+      "protocol": "http",
+      "visibility": "private"
+    }
+  },
+  "postStartCommand": "python3 codespaces/start.py --background",
+  "shutdownAction": "stopCompose",
+  "waitFor": "updateContentCommand",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "workbench.startupEditor": "none",
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
+        "chat.disableAIFeatures": true,
+        "remote.autoForwardPorts": true,
+        "remote.autoForwardPortsSource": "process",
+        "remote.restoreForwardedPorts": false
+      }
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  }
+}

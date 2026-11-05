@@ -19,7 +19,7 @@ services:
       XDG_CACHE_HOME: /workspaces/foxrun-state/cache
       FOXRUN_OPENCODE_TRANSCRIPTS: /workspaces/foxrun-state/transcripts
       FOXRUN_OPENCODE_URL: http://127.0.0.1:8081
-      FOXRUN_OPENCODE_MODEL: dmr/foxrun/gemma4-e4b:qat-q4_0-32k
+      FOXRUN_OPENCODE_MODEL: dmr/docker.io/ai/gemma4@sha256:0a4cfc34b9fe5dbbe754654f0ccbc6952e26c3d7d28c9ae0f3690177d82e16c6
       MODEL_RUNNER_HOST: http://model-runner:12434
       NO_PROXY: localhost,127.0.0.1,model-runner
       no_proxy: localhost,127.0.0.1,model-runner
@@ -29,8 +29,10 @@ services:
   model-runner:
     image: docker/model-runner@sha256:60e6a14d8cc331fab3e51d7b78bba98274b4d28573f4e0b345e475d52d167869
     environment:
-      LLAMA_ARGS: --ctx-size 32768 --threads 4 --threads-batch 4 --n-gpu-layers 0 --jinja
       DO_NOT_TRACK: "1"
+    cpus: 4
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - model-cache:/models
     healthcheck:

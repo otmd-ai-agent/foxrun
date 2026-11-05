@@ -1,4 +1,4 @@
-"""Exercise configuration preservation, startup guards, and download integrity."""
+"""Exercise configuration preservation and startup guards."""
 import importlib.util
 import json
 import os
@@ -104,6 +104,15 @@ class StartupTests(unittest.TestCase):
         model.assert_not_called()
         process.assert_not_called()
 
+    def test_failed_model_probe_does_not_start_opencode(self):
+        with patch.object(start, 'healthy', return_value=False), \
+                patch.object(start.subprocess, 'check_output', return_value=start.OPENCODE_VERSION), \
+                patch.object(start, 'ensure_model', side_effect=RuntimeError('Startup probe failed')), \
+                patch.object(start.subprocess, 'Popen') as process:
+            with self.assertRaisesRegex(RuntimeError, 'Startup probe failed'):
+                start.start(self.state, 0, user_home=self.state / 'user')
+        process.assert_not_called()
+
     def test_unrelated_listener_is_not_killed_or_replaced(self):
         with socket.socket() as listener:
             listener.bind(('0.0.0.0', 0))
@@ -114,23 +123,6 @@ class StartupTests(unittest.TestCase):
                     start.start(self.state, port, user_home=self.state / 'user')
             model.assert_not_called()
 
-    def test_invalid_model_is_not_packaged(self):
-        model = self.state / 'supplied.gguf'
-        model.write_bytes(b'wrong model bytes')
-        self.env['FOXRUN_MODEL_FILE'] = str(model)
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
-        response.read.return_value = b'{}'
-        opener = Mock()
-        opener.open.return_value = response
-        with patch.object(start, 'local_opener', return_value=opener), \
-                patch.object(start.subprocess, 'run', return_value=Mock(returncode=1)) as runner:
-            with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
-                start.ensure_model(self.state, self.env)
-        self.assertEqual(runner.call_count, 1)
-        self.assertEqual(runner.call_args.args[0][1], 'inspect')
-        self.assertTrue(model.exists())
 
 
 if __name__ == '__main__':

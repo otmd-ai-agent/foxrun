@@ -14,12 +14,12 @@ import time
 import urllib.request
 
 SOURCE = Path(__file__).resolve().parents[1]
-MODEL = 'foxrun/gemma4-e4b:qat-q4_0-32k'
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import model_cache
+from model_client import ModelClient
 
-MODEL_BYTES = model_cache.MODEL_BYTES
-CONTEXT = 32768
+MODEL_CONFIG = json.loads(Path(__file__).with_name('gemma.lock.json').read_text())
+MODEL = MODEL_CONFIG['model']
+CONTEXT = MODEL_CONFIG['context_size']
 OPENCODE_VERSION = '1.19.5'
 
 
@@ -135,7 +135,7 @@ def configure(state, port, env, user_home=None):
         'name': 'Docker Model Runner',
         'options': {'baseURL': env.get('MODEL_RUNNER_HOST', 'http://model-runner:12434').rstrip('/') + '/engines/v1',
                     'timeout': 1800000},
-        'models': {MODEL: {'name': 'Local Gemma 4 E4B', 'tool_call': True,
+        'models': {MODEL: {'name': 'Local Gemma 4 E2B', 'tool_call': True,
                            'limit': {'context': CONTEXT, 'output': 4096}}},
     }
     source_plugin = (SOURCE / 'hooks/opencode/foxrun.mjs').as_uri()
@@ -181,17 +181,7 @@ def ensure_model(state, env):
             if attempt == 59:
                 raise RuntimeError('Docker Model Runner did not become ready.')
             time.sleep(2)
-    dmr = env.get('DMR_BIN', 'dmr')
-    if subprocess.run([dmr, 'inspect', MODEL], env=env, capture_output=True).returncode == 0:
-        return
-    model_file = Path(env.get('FOXRUN_MODEL_FILE') or model_cache.CACHED_MODEL).resolve()
-    model_cache.verify(model_file)
-    model_cache.require_space(state, 'Model Runner import')
-    print('Importing the model from the image cache into Docker Model Runner.', flush=True)
-    with (state / 'model-load.log').open('a') as log:
-        subprocess.run([dmr, 'package', '--gguf', str(model_file), '--context-size', str(CONTEXT), MODEL],
-                       env=env, stdout=log, stderr=log, check=True)
-    print('Model Runner import finished.', flush=True)
+    ModelClient(host, MODEL_CONFIG).initialize()
 
 
 def start(state, port, user_home=None):

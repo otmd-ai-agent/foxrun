@@ -110,7 +110,7 @@ def configure(state, port, env, user_home=None):
         shutil.copytree(SOURCE / 'plugins' / 'foxrun' / 'skills' / name, target, dirs_exist_ok=True)
     (launch / 'AGENTS.md').write_text(
         '# Foxrun onboarding\n\n'
-        'Use the foxrun-setup skill to install and configure Foxrun. Ask for the person\'s name '
+        'Use the foxrun-setup agent and its Foxrun tools to install and configure Foxrun. Ask for the person\'s name '
         'and first workspace; do not invent them. This Codespace uses OpenCode and a local '
         'Docker Model Runner model. Install from FOXRUN_PRODUCT_SOURCE with --runtime opencode. '
         'FOXRUN_HOME and FOXRUN_PORTFOLIO name persistent locations.\n\n'
@@ -145,10 +145,27 @@ def configure(state, port, env, user_home=None):
         config['plugin'] = [item for item in plugins if item != source_plugin]
     elif source_plugin not in plugins:
         plugins.append(source_plugin)
+    config.setdefault('agent', {})['foxrun-setup'] = {
+        'description': 'Install Foxrun and choose its agent threads.',
+        'mode': 'primary', 'temperature': 0.1, 'steps': 32,
+        'prompt': Path(__file__).with_name('setup-agent.txt').read_text(),
+        'permission': {
+            '*': 'deny', 'question': 'allow',
+            'foxrun_status': 'allow', 'foxrun_doctor': 'allow', 'foxrun_plan': 'allow',
+            'foxrun_install': 'ask', 'foxrun_make': 'ask', 'foxrun_memory': 'ask',
+        },
+    }
+    tools_dir = config_dir / 'tools'
+    tools_dir.mkdir(exist_ok=True)
+    shutil.copyfile(Path(__file__).with_name('foxrun-tools.ts'), tools_dir / 'foxrun.ts')
+    launch_config = launch / 'opencode.json'
+    project = json.loads(launch_config.read_text()) if launch_config.exists() else {}
+    project.update({'$schema': 'https://opencode.ai/config.json', 'default_agent': 'foxrun-setup'})
+    write_json(launch_config, project)
     config.setdefault('command', {})['foxrun-setup'] = {
         'description': 'Set up Foxrun with your name and workspace',
-        'template': 'Load the foxrun-setup skill and complete its onboarding steps. '
-                    'Use the local source in FOXRUN_PRODUCT_SOURCE and runtime opencode.',
+        'agent': 'foxrun-setup',
+        'template': 'Set up Foxrun using your Codespaces onboarding sequence.',
     }
     write_json(path, config)
     return launch

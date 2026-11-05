@@ -708,10 +708,10 @@ for runtime,extension,render in renderers:
   folder.mkdir(parents=True,exist_ok=True)
   with (folder/(ident+'.'+extension)).open('w',encoding='utf-8',newline='\\n') as stream:
    stream.write(text)
-source=identity.path
+identity_text=identity.path.read_text(encoding="utf-8")
 for target in (repo/'generated'/(ident+'.md'),workspace/'team'/(ident+'.md')):
  with target.open('w',encoding='utf-8',newline='\\n') as stream:
-  stream.write(source.read_text(encoding="utf-8"))
+  stream.write(identity_text)
 # System seats use the same resolver as starts and every other seat reader.
 names={p.stem for folder in (repo,repo.parent/'profile/agents') for p in folder.glob('*.md')}
 for name in sorted(names):

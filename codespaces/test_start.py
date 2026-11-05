@@ -93,6 +93,13 @@ class StartupTests(unittest.TestCase):
         self.assertIn('mine', actual['command'])
         self.assertEqual(actual['enabled_providers'], ['dmr'])
         self.assertEqual(actual['model'], actual['small_model'])
+        self.assertEqual(actual['command']['foxrun-setup']['agent'], 'foxrun-setup')
+        policy = actual['agent']['foxrun-setup']['permission']
+        self.assertEqual(policy['foxrun_install'], 'ask')
+        self.assertEqual(policy['*'], 'deny')
+        self.assertEqual(policy['foxrun_status'], 'allow')
+        self.assertTrue((path.parent / 'tools/foxrun.ts').is_file())
+        self.assertEqual(json.loads((launch / 'opencode.json').read_text())['default_agent'], 'foxrun-setup')
         self.assertFalse((self.state / 'system/config/person.json').exists())
         self.assertTrue((launch / '.opencode/skills/foxrun-setup/SKILL.md').exists())
         self.assertNotIn(self.secret, path.read_text())

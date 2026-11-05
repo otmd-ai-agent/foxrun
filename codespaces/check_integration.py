@@ -113,7 +113,15 @@ def run(binary, state):
                                        cwd=launch, env=env, stdout=log, stderr=log)
         wait_for(lambda: start.healthy(port, secret), 'OpenCode did not start')
         assert {'foxrun-setup', 'thread', 'foxrun-help'} <= {item['name'] for item in api('/skill')}
-        api('/session', {'title': 'Bootstrap fixture'})
+        bootstrap = api('/session', {'title': 'Bootstrap fixture'})['id']
+        api('/session/' + bootstrap + '/message',
+            {'agent': 'foxrun-setup', 'parts': [{'type': 'text', 'text': 'Set up Foxrun.'}]})
+        setup_request = LocalModel.requests[-1]
+        setup_tools = {tool['function']['name'] for tool in setup_request['tools']}
+        assert setup_tools == {'question', 'foxrun_status', 'foxrun_install', 'foxrun_doctor',
+                               'foxrun_plan', 'foxrun_make', 'foxrun_memory'}, setup_tools
+        assert len(json.dumps(setup_request)) < 24000, 'Setup request grew beyond the prompt budget'
+        print('PASS focused onboarding tools and prompt budget')
         print('PASS native server and bootstrap skill discovery')
 
         system, portfolio = state / 'system', state / 'portfolio'
@@ -124,6 +132,13 @@ def run(binary, state):
         assert 'Doctor: 0 failed' in command(['python3', str(user_home / '.foxrun/foxrun.py'), 'doctor'])
         assert (user_home / 'foxrun/trial/AGENTS.md').samefile(portfolio / 'trial/AGENTS.md')
         print('PASS default product-path aliases reach the actual installation')
+        lead = portfolio / 'trial/team/lead-trial.md'
+        assert lead.read_bytes() == (system / 'agents/generated/lead-trial.md').read_bytes()
+        assert len(lead.read_bytes()) > 0
+        plan = json.loads(command(['python3', str(system / 'skills/thread/bin/thread'), 'plan',
+                                   'lead', 'trial', '--runtime', 'opencode', '--workspace', 'trial']))
+        assert plan['runtime'] == 'opencode', plan
+        print('PASS workspace lead identity survives installation and supports OpenCode')
         command(['python3', str(system / 'foxrun.py'), 'hookup', '--runtime', 'opencode',
                  '--runtime-home', str(config_path.parent)])
         assert 'Nothing changed.' in command(['python3', str(system / 'foxrun.py'), 'hookup', '--runtime', 'opencode',

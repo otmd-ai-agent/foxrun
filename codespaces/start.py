@@ -186,8 +186,7 @@ def ensure_model(state, env):
         return
     model_file = Path(env.get('FOXRUN_MODEL_FILE') or model_cache.CACHED_MODEL).resolve()
     model_cache.verify(model_file)
-    if shutil.disk_usage(state).free < MODEL_BYTES + 1024**3:
-        raise RuntimeError('Model import needs at least 6.2 GB free for the Model Runner copy.')
+    model_cache.require_space(state, 'Model Runner import')
     print('Importing the model from the image cache into Docker Model Runner.', flush=True)
     with (state / 'model-load.log').open('a') as log:
         subprocess.run([dmr, 'package', '--gguf', str(model_file), '--context-size', str(CONTEXT), MODEL],
@@ -228,13 +227,32 @@ def start(state, port, user_home=None):
     raise RuntimeError(f'OpenCode did not become ready. Read {state / "opencode.log"}.')
 
 
+def launch_background(state):
+    """Keep model startup failures out of the container creation lifecycle."""
+    log_path = state / 'startup.log'
+    with log_path.open('a') as log:
+        process = subprocess.Popen(
+            [sys.executable, '-u', str(Path(__file__).resolve())],
+            cwd=SOURCE, stdin=subprocess.DEVNULL, stdout=log,
+            stderr=subprocess.STDOUT, start_new_session=True,
+        )
+    print(f'OpenCode startup is running in the background. Read {log_path} for progress or errors.')
+    print('If startup fails, fix the reported issue and run: python3 codespaces/start.py')
+    return process
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--password', action='store_true', help='show your private OpenCode browser password')
-    parser.add_argument('--configure-only', action='store_true', help='prepare local configuration without starting services')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--background', action='store_true', help='start in the background and save output to startup.log')
+    mode.add_argument('--password', action='store_true', help='show your private OpenCode browser password')
+    mode.add_argument('--configure-only', action='store_true', help='prepare local configuration without starting services')
     args = parser.parse_args()
     state, port = settings()
     state.mkdir(parents=True, exist_ok=True)
+    if args.background:
+        launch_background(state)
+        return
     with (state / 'startup.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if args.password:

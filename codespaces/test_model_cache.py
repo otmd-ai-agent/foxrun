@@ -74,6 +74,28 @@ class ModelCacheTests(unittest.TestCase):
             self.assertEqual(self.model.read_bytes(), self.data)
             self.assertFalse((state / 'model.gguf').exists())
 
+    def test_low_disk_stops_import_and_reports_available_space(self):
+        self.model.parent.mkdir(parents=True)
+        self.model.write_bytes(self.data)
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(b'{}')
+        with patch.object(start, 'local_opener', return_value=opener), \
+                patch.object(start.subprocess, 'run', return_value=Mock(returncode=1)) as runner, \
+                patch.object(model_cache.shutil, 'disk_usage', return_value=Mock(free=500_000_000)):
+            with self.assertRaisesRegex(RuntimeError, r'Model Runner import needs .*0.50 GB is available'):
+                start.ensure_model(self.root, {'FOXRUN_MODEL_FILE': str(self.model)})
+        self.assertEqual(runner.call_count, 1)
+        self.assertTrue(self.model.exists())
+
+    def test_low_disk_stops_download_before_writing_partial_file(self):
+        with patch.object(model_cache.shutil, 'disk_usage', return_value=Mock(free=500_000_000)), \
+                patch.object(model_cache.urllib.request, 'urlopen') as fetch:
+            with self.assertRaisesRegex(RuntimeError, r'Image model cache needs .*0.50 GB is available'):
+                model_cache.prepare(self.model)
+        fetch.assert_not_called()
+        self.assertFalse(self.model.exists())
+        self.assertFalse(self.model.with_suffix('.partial').exists())
+
     def test_missing_image_cache_fails_without_download(self):
         opener = Mock()
         opener.open.return_value = io.BytesIO(b'{}')

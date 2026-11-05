@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
+import sys
+import time
 import tempfile
 import unittest
 from unittest.mock import patch, Mock
@@ -20,6 +23,26 @@ class StartupTests(unittest.TestCase):
         self.state = Path(self.temporary.name)
         self.secret = start.password(self.state)
         self.env = start.environment(self.state, 8081, self.secret)
+
+    def test_background_startup_logs_worker_failure_without_failing_lifecycle(self):
+        env = dict(os.environ, FOXRUN_CODESPACES_STATE=str(self.state))
+        script = str(Path(start.__file__).resolve())
+        result = subprocess.run([sys.executable, script, '--background'], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('startup.log', result.stdout)
+        log = self.state / 'startup.log'
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if log.exists() and 'Rebuild the devcontainer' in log.read_text():
+                break
+            time.sleep(0.05)
+        self.assertIn('Codespaces startup requires the container account home', log.read_text())
+        foreground = subprocess.run([sys.executable, script], env=env,
+                                    capture_output=True, text=True, timeout=5)
+        self.assertEqual(foreground.returncode, 1)
+        self.assertIn('Rebuild the devcontainer', foreground.stderr)
+        self.assertFalse((self.state / 'user').exists())
 
     def test_home_aliases_are_checked_and_stay_inside_state(self):
         user_home = self.state / 'user'

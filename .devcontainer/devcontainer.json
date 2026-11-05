@@ -7,7 +7,7 @@
   "hostRequirements": {
     "cpus": 4,
     "memory": "16gb",
-    "storage": "32gb"
+    "storage": "64gb"
   },
   "portsAttributes": {
     "8081": {
@@ -17,9 +17,9 @@
       "visibility": "private"
     }
   },
-  "postStartCommand": "python3 codespaces/start.py",
+  "postStartCommand": "python3 codespaces/start.py --background",
   "shutdownAction": "stopCompose",
-  "waitFor": "postStartCommand",
+  "waitFor": "updateContentCommand",
   "customizations": {
     "vscode": {
       "settings": {

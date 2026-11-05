@@ -6,8 +6,8 @@ This is intended for a disposable session of about an hour. The configuration sk
 
 ## Start
 
-1. Create a Codespace from the branch containing this configuration. Use a Linux x86-64 machine with at least 4 CPUs, 16 GB RAM, and 32 GB storage.
-2. Wait for the container image. Its first build downloads and verifies the **5.15 GB** model. A ready Codespaces prebuild reuses that image. Startup imports the cached file into Docker Model Runner before OpenCode opens; it does not download weights from Hugging Face.
+1. Create a Codespace from the branch containing this configuration. Use a Linux x86-64 machine with at least 4 CPUs, 16 GB RAM, and 64 GB storage.
+2. Wait for the container image. Its first build downloads and verifies the **5.15 GB** model. A ready Codespaces prebuild reuses that image. The editor can open while startup imports the cached file into Docker Model Runner. OpenCode starts after the import; startup does not download weights from Hugging Face.
 3. The editor is configured to detect port **8081** and open it in a separate browser tab. If the tab does not open, choose **Ports → 8081 → Open in Browser**. Keep the port private and its protocol HTTP; GitHub supplies the browser's HTTPS address.
 4. Sign in to OpenCode with username `opencode`. Show your generated password in the Codespaces terminal:
 
@@ -21,6 +21,8 @@ This is intended for a disposable session of about an hour. The configuration sk
 OpenCode runs commands and edits files with the Codespace user's permissions. Its normal approval controls remain available. Both its main and small-model settings use the local Docker Model Runner provider; hosted providers are not enabled by this configuration.
 
 ## Storage and configuration
+
+Allow space for both the 5.15 GB image cache and Model Runner's imported copy, plus the container images, repository, and tools. The configuration requests at least 64 GB storage. Each model preparation step also checks for about 6.23 GB of free space and reports the available space if it cannot continue. A prebuild reduces download time; it does not remove these storage requirements.
 
 The container account's home is `/workspaces/foxrun-state/user`. Startup creates checked `~/.foxrun` and `~/foxrun` aliases to the installed system and portfolio, so existing product skills that use those default paths reach the same records. Startup refuses conflicting paths and never changes the caller's home environment. A rebuild is required to adopt this account-home setting.
 
@@ -48,20 +50,31 @@ See [GitHub's prebuild configuration guide](https://docs.github.com/en/codespace
 
 ## Checks and troubleshooting
 
+If an older revision entered recovery mode with `Model setup needs at least 11.4 GB free`, both services may already have started: the model startup check failed afterward. Update this branch with `git pull --ff-only`. On [your Codespaces page](https://github.com/codespaces), check storage capacity and usage. If needed, use the Codespace's **… → Change machine type** menu to select at least 64 GB storage, then rebuild the container. Rebuilding alone does not request a larger machine. See [GitHub's machine-type guide](https://docs.github.com/en/codespaces/customizing-your-codespace/changing-the-machine-type-for-your-codespace?tool=webui). A larger machine may have a higher billing rate.
+
+If the editor's creation-log command is unavailable, read the log in the recovery terminal:
+
+```sh
+tail -n 80 /workspaces/.codespaces/.persistedshare/creation.log
+```
+
 Run these commands from the source checkout:
 
 ```sh
 python3 codespaces/start.py
 python3 -m unittest discover -s codespaces -p 'test_*.py' -v
 python3 codespaces/check_integration.py --opencode /usr/local/bin/opencode
+tail -n 60 /workspaces/foxrun-state/startup.log
 tail -n 60 /workspaces/foxrun-state/opencode.log
 tail -n 60 /workspaces/foxrun-state/model-load.log
 ```
+
+The container launches startup in the background. A model or app startup failure is written to `startup.log` and does not fail the container lifecycle command. After fixing the reported issue, run `python3 codespaces/start.py` to retry in the foreground.
 
 Startup checks OpenCode's authenticated health endpoint and refuses to replace an unrelated process on port 8081. Running startup again reuses the existing healthy server.
 
 If the browser returns HTTP 502 while OpenCode is healthy, remove the existing port forwarding entry, add port 8081 again, select **Change Port Protocol → HTTP**, and use **Open in Browser**. That recovered the previous demo in a live Codespace. Automatic forwarding and browser launch for this OpenCode configuration still require a fresh Codespace test.
 
-Thirteen local tests cover image-cache reuse, interrupted and invalid downloads, fresh-volume imports without weight downloads, configuration preservation, checked home aliases, private credentials, repeat startup, and occupied-port handling. The pinned OpenCode binary passed config validation, served its authenticated health and skill endpoints, and loaded its real browser UI in Chromium with no failed requests or page errors. Docker execution is unavailable in the development session used for this change. The reproducible integration check runs the real installer and OpenCode lifecycle against a deterministic local HTTP model fixture in temporary storage. It also checks commands through the default-path aliases using an injected temporary home path; it does not change the test runner's home. It does not download or run Gemma. These checks do not establish end-to-end Gemma tool use or Codespaces browser behavior.
+Local tests cover background startup failure logging, insufficient disk space, image-cache reuse, interrupted and invalid downloads, fresh-volume imports without weight downloads, configuration preservation, checked home aliases, private credentials, repeat startup, and occupied-port handling. The pinned OpenCode binary passed config validation, served its authenticated health and skill endpoints, and loaded its real browser UI in Chromium with no failed requests or page errors. Docker execution is unavailable in the development session used for this change. The reproducible integration check runs the real installer and OpenCode lifecycle against a deterministic local HTTP model fixture in temporary storage. It also checks commands through the default-path aliases using an injected temporary home path; it does not change the test runner's home. It does not download or run Gemma. These checks do not establish end-to-end Gemma tool use or Codespaces browser behavior.
 
 References: [OpenCode web interface](https://opencode.ai/docs/web/), [Docker Model Runner integration](https://docs.docker.com/guides/opencode-model-runner/), and [the pinned Gemma model card](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/blob/4b4a2c1d584be7264f87aac328a1bc739ce81b6c/README.md).

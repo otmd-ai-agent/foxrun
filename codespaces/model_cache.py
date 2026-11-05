@@ -24,6 +24,17 @@ def verify(path):
     return path
 
 
+def require_space(path, operation):
+    available = shutil.disk_usage(path).free
+    required = MODEL_BYTES + 1024**3
+    if available < required:
+        raise RuntimeError(
+            f'{operation} needs {required / 1e9:.2f} GB free; '
+            f'{available / 1e9:.2f} GB is available on {path}. '
+            'Use a Codespace with at least 64 GB storage and enough free space, then retry.'
+        )
+
+
 def prepare(path=CACHED_MODEL):
     path = Path(path)
     if path.exists():
@@ -31,8 +42,7 @@ def prepare(path=CACHED_MODEL):
         print('Using the verified model already in the image cache.', flush=True)
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(path.parent).free < MODEL_BYTES + 1024**3:
-        raise RuntimeError('The image build needs at least 6.2 GB free to cache the model.')
+    require_space(path.parent, 'Image model cache')
     partial = path.with_suffix('.partial')
     print('Downloading the pinned model into the image cache (5.15 GB).', flush=True)
     try:

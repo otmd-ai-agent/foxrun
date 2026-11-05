@@ -104,6 +104,22 @@ class StartupTests(unittest.TestCase):
         model.assert_not_called()
         process.assert_not_called()
 
+    def test_restart_accepts_port_with_closed_connections(self):
+        with socket.socket() as listener, socket.socket() as client:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            client.connect(('127.0.0.1', port))
+            accepted, _ = listener.accept()
+            accepted.close()
+            self.assertEqual(client.recv(1), b'')
+        with patch.object(start, 'healthy', return_value=False), \
+                patch.object(start.subprocess, 'check_output', return_value=start.OPENCODE_VERSION), \
+                patch.object(start, 'ensure_model', side_effect=RuntimeError('Reached model startup')):
+            with self.assertRaisesRegex(RuntimeError, 'Reached model startup'):
+                start.start(self.state, port, user_home=self.state / 'user')
+
     def test_failed_model_probe_does_not_start_opencode(self):
         with patch.object(start, 'healthy', return_value=False), \
                 patch.object(start.subprocess, 'check_output', return_value=start.OPENCODE_VERSION), \

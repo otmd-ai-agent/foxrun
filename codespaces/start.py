@@ -192,6 +192,8 @@ def start(state, port, user_home=None):
         print(f'OpenCode is already running on port {port}.')
         return
     with socket.socket() as probe:
+        # A closed server can leave TIME_WAIT sockets without a live listener.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(('0.0.0.0', port))
         except OSError as error:

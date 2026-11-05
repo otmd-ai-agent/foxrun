@@ -64,12 +64,29 @@ tail -n 60 /workspaces/foxrun-state/opencode.log
 
 The container launches startup in the background. A model or app startup failure is written to `startup.log` and does not fail the container lifecycle command. After fixing the reported issue, run `python3 codespaces/start.py` to retry in the foreground.
 
-Startup checks OpenCode's authenticated health endpoint and refuses to replace an unrelated process on port 8081. Running startup again reuses the existing healthy server.
+Startup checks OpenCode's authenticated health endpoint and refuses to replace an unrelated process on port 8081. Running startup again reuses the existing healthy server. The port check permits recently closed connections so an immediate restart is not mistaken for a conflicting listener.
 
 If the browser returns HTTP 502 while OpenCode is healthy, remove the existing port forwarding entry, add port 8081 again, select **Change Port Protocol → HTTP**, and use **Open in Browser**. That recovered the previous demo in a live Codespace. Automatic forwarding and browser launch for this OpenCode configuration still require a fresh Codespace test.
 
 Local tests cover streamed pull failures, incomplete downloads, cached-model inference failures, incorrect probe answers, configuration preservation, checked home aliases, private credentials, background startup errors, repeat startup, and occupied ports. An HTTP fixture exercises cold and warm initialization with the exact model digest and configured context. These fixtures do not download or run Gemma.
 
-The reproducible integration check runs the real installer and pinned OpenCode host against a deterministic local model fixture. It checks installed skills, lifecycle hooks, transcripts, handoffs, compaction, and commands through default-path aliases using a temporary home. It does not change the test runner's home. Docker execution is unavailable in the development session used for this change. Full Gemma tool use and Codespaces browser behavior remain live validation gates.
+The reproducible integration check runs the real installer and pinned OpenCode host against a deterministic local model fixture. It checks installed skills, lifecycle hooks, transcripts, handoffs, compaction, and commands through default-path aliases using a temporary home. It does not change the test runner's home. A local Docker Desktop run on 4 November 2026 built and started the actual devcontainer, installed Foxrun with zero doctor failures, discovered 63 skills, and executed a real Gemma/OpenCode bash tool call. The runner had four CPU threads in a Docker VM with about 15.6 GiB RAM; other containers were also running.
+
+| Local check | Observed result |
+| --- | --- |
+| Cold application image preparation | About 47 seconds |
+| Cold 4.09 GB model pull to configuration | About 337 seconds on this connection |
+| Initial model READY probe | 3.755 seconds |
+| Foxrun installer | 4.775 seconds; doctor reported zero failures |
+| First agent request, including a bash tool call | 166.57 seconds; about 22K prompt tokens |
+| OpenCode restarts with the model already loaded | 3.333 and 3.195 seconds |
+| Runner memory peak through these checks | About 5.4 GiB; no OOM events |
+| Authenticated health and browser HTML | Passed |
+
+The first restart exposed a false port-conflict check: no process was listening, but closed TCP connections prevented a plain bind. The startup probe now uses `SO_REUSEADDR`; regression coverage also verifies that an active unrelated listener is still rejected.
+
+These local timings are not Codespaces timings, and a single tool call does not establish full onboarding reliability. Fresh Codespaces creation and automatic browser opening remain validation gates.
+
+Docker Desktop hides this runner image from Compose listings, as documented in the workshop. The local test started the named runner explicitly and used a test-only Compose override to omit that dependency after checking its health. It used a source snapshot volume because the temporary checkout was outside Desktop's shared host paths. Dev Containers CLI 0.90.0 used a temporary directory inside the build context for compatibility with Compose 5.6.0's build-file access checks. These local overrides do not change the Codespaces configuration.
 
 References: [OpenCode web interface](https://opencode.ai/docs/web/), [Docker Model Runner integration](https://docs.docker.com/guides/opencode-model-runner/), and [the workshop model lock](https://github.com/onthemarkdata/semantic-contracts-workshop/blob/7cece7c44725a23da05349c64f198d9e810109b1/models/gemma.lock.json).
